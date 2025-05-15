@@ -204,3 +204,46 @@ def get_available_slots_v1(
 # Aliases for backward compatibility
 get_event_type_details = get_event_type_details_v2
 get_available_slots = get_available_slots_v1
+
+def create_booking(
+    api_key: str,
+    event_type_id: str,
+    slot_time: str,  # Must be ISO8601 UTC string, not formatted
+    user_email: str,
+    user_name: str = None,
+    event_type_slug: str = None,
+    username: str = None,
+    time_zone: str = "Europe/Helsinki",
+    language: str = "en"
+) -> Dict[str, Any]:
+    """
+    Books a slot for the given event type and user using Cal.com v2 API.
+    slot_time must be the ISO8601 UTC string (e.g., '2024-08-13T09:00:00Z'), not the formatted string.
+    Returns a dict with booking details or error.
+    """
+    url = "https://api.cal.com/v2/bookings"
+    headers = {
+        "Content-Type": "application/json",
+        "cal-api-version": "2024-08-13",
+        "Authorization": f"Bearer {api_key}"
+    }
+    payload = {
+        "start": slot_time,  # Should be in UTC ISO format
+        "attendee": {
+            "name": user_name or user_email,
+            "email": user_email,
+            "timeZone": time_zone,
+            "language": language
+        },
+        "eventTypeId": int(event_type_id)
+    }
+    if event_type_slug and username:
+        payload["eventTypeSlug"] = event_type_slug
+        payload["username"] = username
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except requests.RequestException as e:
+        print(f"Booking error: {e}")
+        return {"success": False, "error": str(e)}

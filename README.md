@@ -38,11 +38,35 @@ This project is an AI-powered email assistant that automatically responds to cus
     ```
 
 5.  **Configuration:**
-    *(Details on `config.py` and credential files will go here.)*
+    - Place your Gmail OAuth credentials in `secrets/gmail_credentials.json` (see Google Cloud docs for format).
+    - Place your Gemini and Cal.com API keys in `secrets/credentials.json` as shown above.
+    - Edit `config.py` if you need to change the assistant email or Cal.com settings.
 
 ## Running the Bot
 
-*(Instructions on how to run `main.py` will go here.)*
+```bash
+python main.py
+```
+The bot will authenticate with Gmail, check for unread emails, and process them automatically.
+
+---
+
+## Testing
+
+This project uses `pytest` for testing. To run all tests:
+
+1. **Activate your virtual environment (if not already active):**
+   ```powershell
+   .venv\Scripts\Activate.ps1
+   ```
+
+2. **Run tests:**
+   ```bash
+   pytest
+   ```
+   This will discover and run all tests in the `tests/` directory.
+
+---
 
 ## Development
 
@@ -53,4 +77,17 @@ When adding new packages, install them using `pip install <package-name>` (ideal
 # If your venv is activated, you can just use: pip freeze > requirements.txt
 # For more robustness, call pip from the venv directly:
 .venv\Scripts\pip.exe freeze > requirements.txt
-``` 
+```
+
+## TODO / Next Steps
+
+- Prepare for production deployment on Google Cloud Platform (GCP):
+  - Containerize the app (Dockerfile, requirements.txt, etc.)
+  - Set up GCP Cloud Run or App Engine deployment
+  - Configure environment variables and secrets for production
+- Add webhook support for email threads (Gmail push notifications or polling)
+- Create and configure a dedicated mailbox for the assistant email
+- Harden error handling and logging for production
+- Add more integration and end-to-end tests
+- Update documentation for production setup and GCP deployment 
+- Integrate with voice funtionality

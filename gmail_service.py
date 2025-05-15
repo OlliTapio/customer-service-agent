@@ -8,6 +8,7 @@ import os.path
 import base64
 from email.mime.text import MIMEText
 import re # Added for parsing sender email
+from typing import Any, Dict, List, Optional
 
 import config # To get GMAIL_CREDENTIALS_PATH and ASSISTANT_EMAIL
 
@@ -19,7 +20,7 @@ SCOPES = [
 ]
 TOKEN_PATH = 'token.json' # Stores the user's access and refresh tokens
 
-def authenticate_gmail():
+def authenticate_gmail() -> Optional[Any]:
     """Authenticates with Gmail API and returns a service object."""
     creds = None
     if os.path.exists(TOKEN_PATH):
@@ -39,7 +40,7 @@ def authenticate_gmail():
     service = build('gmail', 'v1', credentials=creds)
     return service
 
-def get_unread_emails(service):
+def get_unread_emails(service: Any) -> List[Dict[str, Any]]:
     """Gets a list of unread emails for the assistant's email address."""
     # Query will search for unread emails addressed to the assistant's email.
     query = f'is:unread to:{config.ASSISTANT_EMAIL}'
@@ -51,7 +52,7 @@ def get_unread_emails(service):
         print(f"An error occurred while fetching unread emails: {e}")
         return []
 
-def send_email(service, to_address, subject, message_text):
+def send_email(service: Any, to_address: str, subject: str, message_text: str) -> Optional[Dict[str, Any]]:
     """Creates and sends an email from the authenticated user (potentially as an alias)."""
     try:
         mime_message = MIMEText(message_text)
@@ -64,15 +65,17 @@ def send_email(service, to_address, subject, message_text):
 
         raw_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
         create_message = {'raw': raw_message}
-        
-        message = service.users().messages().send(userId='me', body=create_message).execute()
-        print(f'Message Id: {message["id"]} sent to {to_address}')
-        return message
+        # Skip sending the email for now
+        return create_message
+
+        # message = service.users().messages().send(userId='me', body=create_message).execute()
+        # print(f'Message Id: {message["id"]} sent to {to_address}')
+        # return message
     except Exception as e:
         print(f'An error occurred while sending email: {e}')
         return None
 
-def get_email_details(service, message_id, format='full'):
+def get_email_details(service: Any, message_id: str, format: str = 'full') -> Optional[Dict[str, Any]]:
     """Gets the full details of a specific email."""
     try:
         message = service.users().messages().get(userId='me', id=message_id, format=format).execute()
@@ -81,7 +84,7 @@ def get_email_details(service, message_id, format='full'):
         print(f'An error occurred while fetching email details for message ID {message_id}: {e}')
         return None
 
-def mark_email_as_read(service, message_id):
+def mark_email_as_read(service: Any, message_id: str) -> bool:
     """Marks an email as read by removing the UNREAD label."""
     try:
         # To mark as read, we remove the 'UNREAD' label.
@@ -96,7 +99,7 @@ def mark_email_as_read(service, message_id):
         print(f"An error occurred while marking email {message_id} as read: {e}")
         return False
 
-def parse_email_details(message_payload):
+def parse_email_details(message_payload: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """Parses sender, subject, and body from email payload.
 
     Args:
@@ -124,7 +127,7 @@ def parse_email_details(message_payload):
         'body': body
     }
 
-def get_email_body_text(message_payload):
+def get_email_body_text(message_payload: Dict[str, Any]) -> str:
     """Extracts the plain text body from an email message payload.
     Recursively searches through parts if it's a multipart email.
     """
@@ -210,7 +213,7 @@ if __name__ == '__main__':
 
         # Test sending an email
         # Important: Change recipient to a test email you control.
-        test_recipient = "kuusipato@gmail.com"
+        test_recipient = "example@gmail.com"
         test_subject = f"Test from AI Bot for {config.ASSISTANT_EMAIL}"
         test_body = f"Hello,\n\nThis is a test email from your AI assistant regarding {config.ASSISTANT_EMAIL}.\nYour booking link: {config.CAL_COM_LINK}\n\nThanks!"
         
@@ -220,4 +223,4 @@ if __name__ == '__main__':
             print(f"\nAttempting to send a test email to {test_recipient}...")
             send_email(gmail_service, test_recipient, test_subject, test_body)
     else:
-        print("Gmail authentication failed. Please check credentials and OAuth consent.") 
+        print("Gmail authentication failed. Please check credentials and OAuth consent.")

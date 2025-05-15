@@ -1,11 +1,13 @@
+from typing import Any, Dict, Optional
 # main.py
 import time
 import gmail_service
 import llm_service
 import cal_service
 import config
+import conversation_manager
 
-def process_single_email(service, email_summary):
+def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
     """Processes a single email: gets details, generates reply, sends reply, marks as read."""
     msg_id = email_summary['id']
     print(f"\nProcessing email ID: {msg_id}...")
@@ -18,8 +20,6 @@ def process_single_email(service, email_summary):
     parsed_info = gmail_service.parse_email_details(email_details.get('payload'))
     if not parsed_info or not parsed_info.get('body'):
         print(f"Could not parse body or essential details for email ID: {msg_id}")
-        # Optionally mark as read or move to an error folder here if desired
-        # gmail_service.mark_email_as_read(service, msg_id) 
         return
 
     sender_email = parsed_info['sender']
@@ -33,49 +33,40 @@ def process_single_email(service, email_summary):
     print(f"  Body Snippet: {body_snippet}...")
 
     if not email_body.strip(): # Don't process empty emails
-        print("  Email body is empty. Skipping LLM processing and marking as read.")
+        print("  Email body is empty. Skipping processing and marking as read.")
         gmail_service.mark_email_as_read(service, msg_id)
         return
         
-    # Get the dynamic booking link from Cal.com service
-    print("  Fetching Cal.com event details...")
-    cal_event_details = cal_service.get_event_type_details(config.CAL_COM_EVENT_TYPE_SLUG)
-    
-    booking_link_to_use = None
-    if cal_event_details and cal_event_details.get('booking_url'):
-        booking_link_to_use = cal_event_details['booking_url']
-        print(f"  Using dynamic Cal.com booking link: {booking_link_to_use}")
-    else:
-        print("  Warning: Could not fetch dynamic booking link from Cal.com. Falling back to static link from config.")
-        # Fallback to the old static link from config if Cal.com API fails or event not found
-        # This assumes you might want to keep a very basic link in config as a last resort.
-        # For now, let's construct it similar to how cal_service does as a fallback.
-        booking_link_to_use = f"https://cal.com/{config.CAL_COM_USERNAME}/{config.CAL_COM_EVENT_TYPE_SLUG}"
-        print(f"  Using fallback static link: {booking_link_to_use}")
+    # Prepare initial state for LangGraph
+    initial_state = conversation_manager.ConversationState(
+        user_input=email_body,
+        user_email=sender_email,
+        user_name=None,  # Optionally parse from email or headers
+        interaction_history=[],
+        classified_intent=None,
+        available_slots=None,
+        generated_response=None,
+        error_message=None,
+        booking_link=None,
+        event_type_slug=None
+    )
 
-    # Generate response using LLM
-    print("  Generating AI response...")
-    ai_reply_text = llm_service.generate_email_response(email_body, booking_link_to_use, website_info="") 
+    # Run through the LangGraph workflow
+    print("  Running LangGraph conversation manager...")
+    final_state = conversation_manager.app.invoke(initial_state)
 
-    if not ai_reply_text or "I apologize, but I couldn't retrieve the specific booking link" in ai_reply_text:
-        print(f"  Failed to generate AI response or booking link was missing. AI Response: {ai_reply_text}")
-        # Decide if you want to mark as read, or leave unread for manual review, or send a generic error reply
-        return
-
-    # Prepare AI reply snippet outside f-string
-    ai_reply_snippet = ai_reply_text[:100].replace('\n', ' ')
-    print(f"  AI Reply Generated: {ai_reply_snippet}...")
-
-    # Send the reply
-    reply_subject = f"Re: {original_subject}"
-    print(f"  Sending reply to: {sender_email} with subject: {reply_subject}")
-    gmail_service.send_email(service, sender_email, reply_subject, ai_reply_text)
+    # Optionally print the final state for debugging
+    print(f"  Final classified intent: {final_state.get('classified_intent')}")
+    print(f"  Final generated response: {final_state.get('generated_response')}")
+    if final_state.get('error_message'):
+        print(f"  Error: {final_state.get('error_message')}")
 
     # Mark original email as read
     gmail_service.mark_email_as_read(service, msg_id)
     print(f"Email ID: {msg_id} processed and marked as read.")
 
-def main():
+def main() -> None:
+    """Main function to start the AI Email Assistant."""
     print("Starting AI Email Assistant...")
 
     if not llm_service.llm_model:
@@ -110,4 +101,4 @@ def main():
     print("\nAI Email Assistant run complete.")
 
 if __name__ == '__main__':
-    main() 
+    main()

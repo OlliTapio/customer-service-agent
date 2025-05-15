@@ -4,8 +4,9 @@ import os
 CAL_COM_LINK = "cal.com/otl-4refod/30min"
 
 # Paths for credentials files
-GMAIL_CREDENTIALS_PATH = "gmail_credentials.json"
-CREDENTIALS_PATH = "credentials.json" # As specified by user
+SECRETS_FOLDER = "secrets"
+GMAIL_CREDENTIALS_PATH = os.path.join(SECRETS_FOLDER, "gmail_credentials.json")
+CREDENTIALS_PATH = os.path.join(SECRETS_FOLDER, "credentials.json")  # Updated to use secrets folder
 
 # Email settings
 ASSISTANT_EMAIL = "assistant@otl.fi"
