@@ -243,6 +243,8 @@ def parse_booked_slot(user_input: str, available_slots: list, conversation_histo
     """Parses the booked slot from the user's input using the LLM.
     Returns the formatted string (slot['time']) for matching in conversation_manager.py.
     The ISO string (slot['iso']) is used for the API call after matching."""
+    if not available_slots:
+        return ""
     # available_slots is a list of dicts with 'time' and 'iso' keys
     slot_list = [slot['time'] if isinstance(slot, dict) and 'time' in slot else str(slot) for slot in available_slots]
     slot_list_str = '\n'.join(f"- {slot}" for slot in slot_list)
@@ -254,3 +256,21 @@ def parse_booked_slot(user_input: str, available_slots: list, conversation_histo
             f"Respond with ONLY the exact slot string (must match one of the above), or an empty string if no match. Do not add any explanation or extra text.\n" \
             f"Conversation history:\n{conversation_history}\n"
     return _safe_generate_content(prompt)
+
+def generate_intent_summary(user_input: str, conversation_history: list = None, user_language: str = None) -> str:
+    """
+    Generates a concise summary of the user's intent and request, suitable for meeting notes.
+    """
+    if not llm_model:
+        return user_input[:200]  # fallback: just truncate the user input
+    prompt = (
+        f"You are an assistant that summarizes meeting requests for the organizer. "
+        f"Given the user's latest message and the conversation history, generate a concise summary (1-2 sentences) "
+        f"explaining the main reason for the meeting. "
+        f"Reply in {user_language if user_language else 'English'}.\n\n"
+        f"CONVERSATION HISTORY:\n{chr(10).join(conversation_history) if conversation_history else 'None'}\n\n"
+        f"LATEST USER INPUT:\n{user_input}\n\n"
+        f"Summary:"
+    )
+    summary = _safe_generate_content(prompt)
+    return summary.strip() if summary else user_input[:200]

@@ -204,6 +204,61 @@ def format_slots(selected_slots: list, user_lang: str) -> list:
         formatted_slots.append({"time": formatted, "iso": dt.isoformat()})
     return formatted_slots
 
+def book_a_meeting_node(state: ConversationState) -> ConversationState:
+    """Books a meeting and updates the state with the booked slot and confirmation message."""
+    print("---NODE: Book a Meeting---")
+    available_slots = state.get("available_slots") or []
+    if not available_slots:
+        state["error_message"] = "No available slots to book."
+        state["interaction_history"].append(f"System: Error - {state['error_message']}")
+        return state
+    slot_string = llm_service.parse_booked_slot(
+        user_input=state.get("user_input", ""),
+        available_slots=available_slots,
+        conversation_history=state.get("interaction_history", [])
+    )
+    print(f"[DEBUG] LLM selected slot string: {slot_string}")
+    slot_to_book = None
+    for slot in available_slots:
+        if slot.get("time") == slot_string:
+            slot_to_book = slot["iso"]
+            break
+    if not slot_to_book:
+        state["error_message"] = "No matching slot found for booking."
+        state["interaction_history"].append(f"System: Error - {state['error_message']}")
+        return state
+    meeting_summary = llm_service.generate_intent_summary(
+        user_input=state.get("user_input", ""),
+        conversation_history=state.get("interaction_history", []),
+        user_language=state.get("user_language", "en")
+    )
+    event_type_slug = state.get("event_type_slug")
+    event_details = cal_service.get_event_type_details_v2(
+        user_cal_username=config.CAL_COM_USERNAME,
+        event_type_slug=event_type_slug
+    )
+    event_type_id = event_details["id"] if event_details and "id" in event_details else None
+    if not event_type_id:
+        state["error_message"] = "Event type ID not found for booking."
+        state["interaction_history"].append(f"System: Error - {state['error_message']}")
+        return state
+    booking_result = cal_service.create_booking(
+        api_key=config.CAL_COM_API_KEY,
+        event_type_id=str(event_type_id),
+        slot_time=slot_to_book,
+        user_email=state["user_email"],
+        user_name=state.get("user_name"),
+        notes=meeting_summary
+    )
+    if booking_result["success"]:
+        state["booked_slot"] = slot_string
+        state["interaction_history"].append(f"System: Booked slot {slot_string} for {state['user_email']}.")
+    else:
+        state["error_message"] = booking_result.get("error", "Unknown error during booking.")
+        state["interaction_history"].append(f"System: Error - {state['error_message']}")
+    print(f"[DEBUG] Booking result: {booking_result}")
+    return state
+
 def generate_response_node(state: ConversationState) -> ConversationState:
     """Generates a response based on the classified intent and gathered information."""
     print("---NODE: Generate Response---")
@@ -212,62 +267,16 @@ def generate_response_node(state: ConversationState) -> ConversationState:
         state["error_message"] = "Cannot generate response: Intent not classified."
         state["interaction_history"].append(f"System: Error - {state['error_message']}")
         return state
-
-    # Booking logic: if user wants to book a slot and slots are available
-    user_input_lower = (state.get("user_input") or "").lower()
-    if (
-        state["classified_intent"] == llm_service.INTENT_REQUEST_BOOKING and
-        ("book" in user_input_lower or "varaa" in user_input_lower) and
-        "slot" in user_input_lower and
-        state.get("available_slots")
-    ):
-        print("[DEBUG] Booking logic triggered.")
-        # Get event type id
-        event_type_slug = state.get("event_type_slug")
-        event_details = cal_service.get_event_type_details_v2(
-            user_cal_username=config.CAL_COM_USERNAME,
-            event_type_slug=event_type_slug
-        )
-        event_type_id = event_details["id"] if event_details and "id" in event_details else None
-        if not event_type_id:
-            state["generated_response"] = "Sorry, I couldn't find the event type to book your meeting."
-            state["error_message"] = "Event type ID not found for booking."
-            state["interaction_history"].append(f"System: Error - {state['error_message']}")
-            return state
-        # Use LLM to parse which slot to book
-        slot_string = llm_service.parse_booked_slot(
-            user_input=state.get("user_input", ""),
-            available_slots=state["available_slots"],
-            conversation_history=state.get("interaction_history", [])
-        )
-        print(f"[DEBUG] LLM selected slot string: {slot_string}")
-        slot_to_book = None
-        for slot in state["available_slots"]:
-            if slot.get("time") == slot_string:
-                slot_to_book = slot["iso"]
-                break
-        if not slot_to_book:
-            state["generated_response"] = "Sorry, I couldn't determine which slot to book. Please specify the slot or try again."
-            state["error_message"] = "No matching slot found for booking."
-            state["interaction_history"].append(f"System: Error - {state['error_message']}")
-            return state
-        booking_result = cal_service.create_booking(
-            api_key=config.CAL_COM_API_KEY,
-            event_type_id=str(event_type_id),
-            slot_time=slot_to_book,
-            user_email=state["user_email"],
-            user_name=state.get("user_name")
-        )
-        if booking_result["success"]:
-            state["generated_response"] = f"Your meeting has been booked for {slot_to_book}. You will receive a confirmation email shortly."
-            state["interaction_history"].append(f"System: Booked slot {slot_to_book} for {state['user_email']}.")
-        else:
-            state["generated_response"] = "Sorry, we couldn't book your meeting. Please try again or use the booking link."
-            state["error_message"] = booking_result.get("error", "Unknown error during booking.")
-            state["interaction_history"].append(f"System: Error - {state['error_message']}")
-        print(f"[DEBUG] Booking result: {booking_result}")
+    # If a meeting was booked, use a template for the confirmation
+    if state.get("booked_slot"):
+        user_lang = state.get("user_language", "en")
+        user_name = state.get("user_name")
+        slot_str = state["booked_slot"]
+        confirmation = f"Hi{f' {user_name}' if user_name else ''},\n\nYour meeting has been booked for {slot_str}. You will receive a confirmation email shortly.\n\nBest regards,\nOlli's Personal Assistant"
+        state["generated_response"] = confirmation
+        state["interaction_history"].append(f"System: Generated booking confirmation for {slot_str}.")
         return state
-
+    # Otherwise, use the normal contextual response logic
     try:
         response_text = llm_service.generate_contextual_response(
             intent=state["classified_intent"],
@@ -325,13 +334,6 @@ def send_response_node(state: ConversationState) -> ConversationState:
         state["interaction_history"].append("System: Skipped sending response (no email/response).")
     # Optionally clear the generated response after sending
     # state["generated_response"] = None
-    return state
-
-def book_a_meeting_node(state: ConversationState) -> ConversationState:
-    """Books a meeting."""
-    print("---NODE: Book a Meeting---")
-    llm_service.parse_booked_slot(state["user_input"], state["available_slots"], state["interaction_history"])
-    state["interaction_history"].append("System: Booking a meeting.")
     return state
 
 def await_further_input_node(state: ConversationState) -> ConversationState:

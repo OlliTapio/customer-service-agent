@@ -214,7 +214,8 @@ def create_booking(
     event_type_slug: str = None,
     username: str = None,
     time_zone: str = "Europe/Helsinki",
-    language: str = "en"
+    language: str = "en",
+    notes: str = None
 ) -> Dict[str, Any]:
     """
     Books a slot for the given event type and user using Cal.com v2 API.
@@ -240,6 +241,8 @@ def create_booking(
     if event_type_slug and username:
         payload["eventTypeSlug"] = event_type_slug
         payload["username"] = username
+    if notes:
+        payload["notes"] = notes
     try:
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
