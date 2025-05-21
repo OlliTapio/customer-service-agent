@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TypedDict, Union
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
 import config
 from conversation_manager.state import AvailableSlot
@@ -19,7 +19,6 @@ class Assisant:
         self.cal_api_key = config.CAL_COM_API_KEY
         self.customer_email = customer_email
         self.customer_name = customer_name
-        self.system_instructions = self.get_system_instructions()
 
     def get_llm_instance(self) -> Optional[ChatGoogleGenerativeAI]:
         """Returns an instance of the LangChain Gemini model."""
@@ -59,18 +58,19 @@ You are able to book meetings with the following tools:
     def start_conversation(self, customer_message: str) -> str:
         """Starts a new conversation with the customer."""
         # Get event type details once during initialization
-        system_message = SystemMessage(content=SYSTEM_INSTRUCTIONS)
+        system_message = SystemMessage(content=self.get_system_instructions())
         human_message = HumanMessage(content=customer_message)
 
         response = self.llm_model.invoke([system_message, human_message])
         return response.content
 
-    def continue_conversation(chat_history: List[tuple[str, str]]) -> str:
+    def continue_conversation(customer_message: str, chat_history: List[tuple[str, str]]) -> str:
         """Continues a conversation with the customer."""
         # Get event type details once during initialization
-        event_type = cal_service.get_event_type_details(cal_username, event_type_slug)
-        if not event_type:
-            raise ValueError(f"Could not find event type {event_type_slug} for user {cal_username}")
+        message_history = []
+        
+        for message in chat_history:
+            message_history.append(BaseMessage(type=message[0], content=message[1]))
 
     @tool
     def get_event_type_details(username: str, event_type_slug: str) -> Optional[Dict[str, Any]]:
