@@ -1,5 +1,5 @@
 import pytest
-import llm_service
+import services.llm_service as llm_service
 
 @pytest.fixture
 def example_slots():

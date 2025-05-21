@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from gmail_service import parse_email_details
+from services.gmail_service import parse_email_details
 
 def test_parse_email_details():
     message_payload = {

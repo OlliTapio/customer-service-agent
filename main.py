@@ -1,16 +1,18 @@
 from typing import Any, Dict, Optional
 # main.py
 import time
-import gmail_service
-import llm_service
-import cal_service
+import services.gmail_service as gmail_service
+import services.llm_service as llm_service
+import services.cal_service as cal_service
 import config
 import conversation_manager
+from datetime import datetime
 
 def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
     """Processes a single email: gets details, generates reply, sends reply, marks as read."""
     msg_id = email_summary['id']
-    print(f"\nProcessing email ID: {msg_id}...")
+    thread_id = email_summary.get('threadId')  # Get Gmail's thread ID
+    print(f"\nProcessing email ID: {msg_id} (Thread ID: {thread_id})...")
 
     email_details = gmail_service.get_email_details(service, msg_id, format='full')
     if not email_details or not email_details.get('payload'):
@@ -36,13 +38,15 @@ def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
         print("  Email body is empty. Skipping processing and marking as read.")
         gmail_service.mark_email_as_read(service, msg_id)
         return
-        
+    
     # Prepare initial state for LangGraph
     initial_state = conversation_manager.ConversationState(
+        thread_id=thread_id,  # Use Gmail's thread ID
+        last_updated=datetime.now().isoformat(),
         user_input=email_body,
         user_email=sender_email,
         user_name=None,  # Optionally parse from email or headers
-        interaction_history=[],
+        interaction_history=[],  # Will be populated from storage if exists
         classified_intent=None,
         available_slots=None,
         generated_response=None,
