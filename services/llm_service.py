@@ -4,17 +4,16 @@ from typing import List, Optional, Dict, Any, TypedDict, Union
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.tools import tool
+from langdetect import detect
 import config
 from conversation_manager.state import AvailableSlot
-from langchain.tools import tool
-from langchain.text import detect
 
 # Initialize the LangChain model
 def get_llm_instance() -> Optional[ChatGoogleGenerativeAI]:
     """Returns an instance of the LangChain Gemini model."""
     if not config.GOOGLE_GEMINI_API_KEY:
-        print("LLM model cannot be initialized: GOOGLE_GEMINI_API_KEY is not set.")
-        return None
+        raise ValueError("Error: GOOGLE_GEMINI_API_KEY is not configured for LLM initialization.")
     try:
         model = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",

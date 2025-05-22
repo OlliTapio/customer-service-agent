@@ -60,8 +60,9 @@ def send_email(service: Any, to_address: str, subject: str, message_text: str) -
         mime_message['subject'] = subject
         # For sending as an alias, ensure 'Send mail as' is configured in Gmail.
         # The API typically respects this if the From address is a configured alias.
-        # mime_message['from'] = config.ASSISTANT_EMAIL # Explicitly setting 'From'
-                                                      # Can be useful, but Gmail's behavior with aliases is key.
+        # mime_message['from'] = config.ASSISTANT_EMAIL 
+        # Explicitly setting 'From'
+        # Can be useful, but Gmail's behavior with aliases is key.
 
         raw_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
         create_message = {'raw': raw_message}

@@ -1,7 +1,7 @@
 /.venv
 /secrets
-/__pycache__
 # Allow example credentials file to be tracked
 !secrets/credentials.example.json
-/tests/__pycache__
 token.json
+#ignore all __pycache__ folders
+__pycache__/

@@ -1,7 +1,15 @@
 from typing import List, Dict, Optional
 import sqlite3
 from datetime import datetime
-import json
+
+class ChatMessage:
+    def __init__(self, role: str, content: str):
+        self.id = id
+        self.thread_id = thread_id
+        self.role = role
+        self.content = content
+        self.created_at = created_at
+
 
 class ConversationDatabase:
     def __init__(self, db_path: str = "conversations.db"):
@@ -30,40 +38,37 @@ class ConversationDatabase:
                 )
             """)
 
-    def save_conversation(
+    
+    def add_message_to_conversation(
         self,
-        conversation_id: Optional[str],
-        user_email: str,
-        message: str,
-        response: str
+        conversation_id: str,
+        message: ChatMessage
     ) -> str:
-        """Save a new message and response to the conversation."""
+        """Add a message to the conversation."""
         with sqlite3.connect(self.db_path) as conn:
-            if not conversation_id:
+            conn.execute(
+                "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
+                (conversation_id, message.role, message.content)
+            )
+            
+        return conversation_id
+
+    def get_or_create_conversation_history(self, conversation_id: str, user_email: str) -> List[ChatMessage]:
+        """Retrieve the conversation history for a given conversation ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            # Check if conversation exists
+            cursor = conn.execute(
+                "SELECT id FROM conversations WHERE id = ?",
+                (conversation_id,)
+            )
+            if cursor.fetchone() is None:
                 # Create new conversation
-                conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 conn.execute(
                     "INSERT INTO conversations (id, user_email) VALUES (?, ?)",
                     (conversation_id, user_email)
                 )
+                return []
             
-            # Save user message
-            conn.execute(
-                "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-                (conversation_id, "user", message)
-            )
-            
-            # Save assistant response
-            conn.execute(
-                "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-                (conversation_id, "assistant", response)
-            )
-            
-            return conversation_id
-
-    def get_conversation_history(self, conversation_id: str) -> List[Dict[str, str]]:
-        """Retrieve the conversation history for a given conversation ID."""
-        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
                 SELECT role, content 
@@ -74,4 +79,4 @@ class ConversationDatabase:
                 (conversation_id,)
             )
             
-            return [{"role": row[0], "content": row[1]} for row in cursor.fetchall()] 
+            return [ChatMessage(row[0], row[1]) for row in cursor.fetchall()] 

@@ -1,96 +1,64 @@
 import requests
 import config
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, TypedDict
+from typing import Dict, List, Optional, Any, TypedDict, Union
 
 CAL_API_V2_BASE_URL = "https://api.cal.com/v2"  # For event-types
 CAL_API_V1_BASE_URL = "https://api.cal.com/v1"  # For slots
 
-# --- TypedDict definitions matching Cal.com V2/Get an Event Type ---
+# --- TypedDict definitions for API responses ---
 class Location(TypedDict, total=False):
     type: str
     address: str
     public: bool
 
-class BookingField(TypedDict):
-    type: str
-    label: str
-    placeholder: str
-    disableOnPrefill: bool
-    isDefault: bool
-    slug: str
-    required: bool
-
-class Recurrence(TypedDict):
-    interval: int
-    occurrences: int
-    frequency: str  # e.g., 'daily', 'weekly', 'monthly', 'yearly'
-
-class BookingWindowItem(TypedDict):
-    type: str  # e.g., 'businessDays'
-    value: int
-    rolling: bool
-
-class BookerLayouts(TypedDict):
-    defaultLayout: str
-    enabledLayouts: List[str]
-
-class Color(TypedDict):
-    lightThemeHex: str
-    darkThemeHex: str
-
-class SeatsConfig(TypedDict):
-    seatsPerTimeSlot: int
-    showAttendeeInfo: bool
-    showAvailabilityCount: bool
-
-class DestinationCalendar(TypedDict):
-    integration: str
-    externalId: str
-
-class Host(TypedDict):
-    userId: int
-    mandatory: bool
-    priority: str  # e.g., 'low', 'medium', 'high'
-    name: str
-    avatarUrl: str
-
-class TeamInfo(TypedDict):
-    id: int
-    slug: str
-    bannerUrl: str
-    name: str
-    logoUrl: str
-    weekStart: str
-    brandColor: str
-    darkBrandColor: str
-    theme: str
-
-# --- TypedDict definitions for V1/slots response ---
 class SlotItem(TypedDict):
     time: str
 
 class SlotsResponse(TypedDict):
     slots: Dict[str, List[SlotItem]]
 
-# Simplified return type for event details
-EventTypeDetail = Dict[str, Any]
+class EventTypeDetail(TypedDict):
+    """Type definition for event type details returned by get_event_type_details_v2."""
+    id: int
+    slug: str
+    title: str
+    length: int
+    description: Optional[str]
+    locations: List[Location]
+    requiresConfirmation: bool
+    booking_url: str
 
+class BookingSuccessResponse(TypedDict):
+    """Type definition for successful booking response."""
+    success: bool  # Always True
+    data: Dict[str, Any]  # The actual booking data from Cal.com API
+
+class BookingErrorResponse(TypedDict):
+    """Type definition for failed booking response."""
+    success: bool  # Always False
+    error: str  # Error message
+
+BookingResponse = Union[BookingSuccessResponse, BookingErrorResponse]
 
 def get_event_type_details_v2(
     user_cal_username: str,
     event_type_slug: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[EventTypeDetail]:
     """Fetches details for a specific event type by its slug using Cal.com API v2.
+    
     Args:
         user_cal_username (str): The Cal.com username (e.g., 'username' from cal.com/username).
         event_type_slug (str): The slug of the event type to fetch (e.g., '30min').
+    
     Returns:
-        Optional[Dict[str, Any]]: A dict of event type details if found, otherwise None.
+        Optional[EventTypeDetail]: A dict of event type details if found, otherwise None.
+    
+    Raises:
+        ValueError: If CAL_COM_API_KEY is not configured.
     """
     if not config.CAL_COM_API_KEY:
-        print("Error: CAL_COM_API_KEY is not configured for get_event_type_details_v2.")
-        return None
+        raise ValueError("Error: CAL_COM_API_KEY is not configured for get_event_type_details_v2.")
 
     headers_v2: Dict[str, str] = {
         "Authorization": f"Bearer {config.CAL_COM_API_KEY}",
@@ -115,7 +83,7 @@ def get_event_type_details_v2(
         for et in event_types_list:
             if et.get('slug') == event_type_slug:
                 # Build basic detail dict
-                detail: Dict[str, Any] = {
+                detail: EventTypeDetail = {
                     "id": et.get('id'),
                     "slug": et.get('slug'),
                     "title": et.get('title'),
@@ -123,7 +91,6 @@ def get_event_type_details_v2(
                     "description": et.get('description'),
                     "locations": et.get('locations'),
                     "requiresConfirmation": et.get('requiresConfirmation'),
-                    # Booking URL
                     "booking_url": f"https://cal.com/{user_cal_username}/{et.get('slug')}"
                 }
                 return detail
@@ -137,30 +104,30 @@ def get_event_type_details_v2(
 
 
 def get_available_slots_v1(
-    api_key: str,
     event_type_id: str,
     days_to_check: int = 14,
     target_timezone: str = "UTC"
 ) -> List[str]:
     """Fetches available slots using Cal.com API v1 for a specified period.
-
-    Example response from API v1:
-    {
-      "slots": {
-        "2024-04-13": [
-          {"time": "2024-04-13T11:00:00+04:00"},
-          {"time": "2024-04-13T12:00:00+04:00"},
-          {"time": "2024-04-13T13:00:00+04:00"}
-        ]
-      }
-    }
+    
+    Args:
+        event_type_id (str): The ID of the event type to fetch slots for.
+        days_to_check (int, optional): Number of days to check for availability. Defaults to 14.
+        target_timezone (str, optional): The timezone to return slots in. Defaults to "UTC".
+    
+    Returns:
+        List[str]: A sorted list of available slot times in ISO8601 format.
+    
+    Raises:
+        ValueError: If CAL_COM_API_KEY is not configured or event_type_id is missing.
     """
-    if not api_key:
-        print("Error: Cal.com API key is required for get_available_slots_v1.")
-        return []
+    if not config.CAL_COM_API_KEY:
+        raise ValueError("Error: CAL_COM_API_KEY is not configured for get_event_type_details_v2.")
+
+    api_key = config.CAL_COM_API_KEY
+
     if not event_type_id:
-        print("Error: event_type_id is required for get_available_slots_v1.")
-        return []
+        raise ValueError("Error: event_type_id is required for get_available_slots_v1.")
 
     tomorrow_utc = (
         datetime.now(timezone.utc)
@@ -206,27 +173,44 @@ get_event_type_details = get_event_type_details_v2
 get_available_slots = get_available_slots_v1
 
 def create_booking(
-    api_key: str,
     event_type_id: str,
-    slot_time: str,  # Must be ISO8601 UTC string, not formatted
+    slot_time: str,
     user_email: str,
-    user_name: str = None,
-    event_type_slug: str = None,
-    username: str = None,
+    user_name: Optional[str] = None,
+    event_type_slug: Optional[str] = None,
+    username: Optional[str] = None,
     time_zone: str = "Europe/Helsinki",
     language: str = "en",
-    notes: str = None
-) -> Dict[str, Any]:
+    notes: Optional[str] = None
+) -> BookingResponse:
+    """Books a slot for the given event type and user using Cal.com v2 API.
+    
+    Args:
+        event_type_id (str): The ID of the event type to book.
+        slot_time (str): The ISO8601 UTC string for the slot time (e.g., '2024-08-13T09:00:00Z').
+        user_email (str): Email address of the attendee.
+        user_name (Optional[str], optional): Name of the attendee. Defaults to None.
+        event_type_slug (Optional[str], optional): Slug of the event type. Defaults to None.
+        username (Optional[str], optional): Cal.com username. Defaults to None.
+        time_zone (str, optional): Timezone for the booking. Defaults to "Europe/Helsinki".
+        language (str, optional): Language for the booking. Defaults to "en".
+        notes (Optional[str], optional): Additional notes for the booking. Defaults to None.
+    
+    Returns:
+        BookingResponse: Either a BookingSuccessResponse or BookingErrorResponse.
+            On success: {"success": True, "data": booking_data}
+            On failure: {"success": False, "error": error_message}
+    
+    Raises:
+        ValueError: If CAL_COM_API_KEY is not configured.
     """
-    Books a slot for the given event type and user using Cal.com v2 API.
-    slot_time must be the ISO8601 UTC string (e.g., '2024-08-13T09:00:00Z'), not the formatted string.
-    Returns a dict with booking details or error.
-    """
-    url = "https://api.cal.com/v2/bookings"
+    if not config.CAL_COM_API_KEY:
+        raise ValueError("Error: CAL_COM_API_KEY is not configured for get_event_type_details_v2.")
+
     headers = {
         "Content-Type": "application/json",
         "cal-api-version": "2024-08-13",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {config.CAL_COM_API_KEY}"
     }
     payload = {
         "start": slot_time,  # Should be in UTC ISO format
@@ -244,7 +228,7 @@ def create_booking(
     if notes:
         payload["notes"] = notes
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(f"{CAL_API_V2_BASE_URL}/bookings", headers=headers, json=payload)
         response.raise_for_status()
         return {"success": True, "data": response.json()}
     except requests.RequestException as e:
