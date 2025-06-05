@@ -1,4 +1,4 @@
-from .state import ConversationState, AvailableSlot
+from .types import EmailConversationState, AvailableSlot, EmailConversationDTO
 from .graph import app, create_conversation_graph
 from .nodes import (
     new_interaction,
@@ -6,13 +6,12 @@ from .nodes import (
     gather_information_node,
     book_a_meeting_node,
     generate_response_node,
-    send_response_node,
-    await_further_input_node,
     end_interaction_node
 )
 
 __all__ = [
-    'ConversationState',
+    'EmailConversationState',
+    'EmailConversationDTO',
     'AvailableSlot',
     'app',
     'create_conversation_graph',
@@ -22,6 +21,5 @@ __all__ = [
     'book_a_meeting_node',
     'generate_response_node',
     'send_response_node',
-    'await_further_input_node',
     'end_interaction_node'
 ] 

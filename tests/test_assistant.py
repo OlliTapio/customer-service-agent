@@ -41,10 +41,14 @@ def test_booking_conversation(mock_cal_service):
     # Initialize the assistant
     assistant = Assistant(
         customer_email="test@example.com",
-        customer_name="Test User"
     )
     
     # First message - asking for available times
-    response1 = assistant.start_conversation("Interested to meet Olli, when is the next available time?")
+    response1 = assistant.handle_conversation("""
+Hello, 
+Im interested to meet Olli, when is the next available time?
+Best regards,
+John Doe
+""")
     assert "Monday, March 18, 2024 at 10:00 AM" in response1
     assert "Monday, March 18, 2024 at 2:00 PM" in response1

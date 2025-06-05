@@ -1,12 +1,15 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 # main.py
 import time
+from email_conversation_manager.types import EmailConversationDTO, EmailConversationState
+from repositories.state_repository import StateRepository
 import services.gmail_service as gmail_service
 import services.llm_service as llm_service
 import services.cal_service as cal_service
 import config
-import conversation_manager
+import email_conversation_manager
 from datetime import datetime
+from controllers.email_controller import EmailController
 
 def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
     """Processes a single email: gets details, generates reply, sends reply, marks as read."""
@@ -39,14 +42,20 @@ def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
         gmail_service.mark_email_as_read(service, msg_id)
         return
     
+    # Try to load existing state from database
+    existing_state: EmailConversationDTO | None = None
+    if thread_id:
+        existing_state = StateRepository.get_state(thread_id)
+    
     # Prepare initial state for LangGraph
-    initial_state = conversation_manager.ConversationState(
+    initial_state = EmailConversationState(
         thread_id=thread_id,  # Use Gmail's thread ID
         last_updated=datetime.now().isoformat(),
         user_input=email_body,
         user_email=sender_email,
         user_name=None,  # Optionally parse from email or headers
-        interaction_history=[],  # Will be populated from storage if exists
+        appended_chat_history=[],
+        previous_chat_history=[],
         classified_intent=None,
         available_slots=None,
         generated_response=None,
@@ -55,9 +64,26 @@ def process_single_email(service: Any, email_summary: Dict[str, Any]) -> None:
         event_type_slug=None
     )
 
+    # If we have existing state, update the initial state with it
+    if existing_state:
+        initial_state.previous_chat_history = existing_state.chat_history
+        initial_state.user_email = existing_state.user_email
+        initial_state.user_name = existing_state.user_name
+        initial_state.last_updated = existing_state.last_updated
+
+    # Save the initial state to database
+    if thread_id:
+        StateRepository.save_state(thread_id, initial_state)
+
     # Run through the LangGraph workflow
     print("  Running LangGraph conversation manager...")
-    final_state = conversation_manager.app.invoke(initial_state)
+    final_state = email_conversation_manager.app.invoke(initial_state)
+
+    # Save the final state to database
+    if thread_id:
+        final_state.last_updated = datetime.now().isoformat()
+        StateRepository.save_state(thread_id, final_state)
+        print(f"Saved final state to database for thread {thread_id}")
 
     # Optionally print the final state for debugging
     print(f"  Final classified intent: {final_state.get('classified_intent')}")
@@ -84,6 +110,8 @@ def main() -> None:
         return
     print("Successfully authenticated with Gmail.")
 
+    email_controller = EmailController()
+
     print(f"Checking for unread emails to {config.ASSISTANT_EMAIL}...")
     unread_emails = gmail_service.get_unread_emails(gmail_api_service)
 
@@ -93,14 +121,10 @@ def main() -> None:
         print(f"Found {len(unread_emails)} unread email(s).")
         for email_summary in unread_emails:
             try:
-                process_single_email(gmail_api_service, email_summary)
-                time.sleep(2) # Small delay between processing emails if you have many
+                email_controller.process_input(email_summary)
+                time.sleep(2)  # Small delay between processing emails
             except Exception as e:
                 print(f"An unexpected error occurred processing email ID {email_summary.get('id', 'N/A')}: {e}")
-                # Optionally, implement more robust error handling here, like:
-                # - Sending a notification to yourself
-                # - Moving the problematic email to a specific folder/label
-                # - Not marking as read so it can be manually reviewed
 
     print("\nAI Email Assistant run complete.")
 

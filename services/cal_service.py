@@ -1,24 +1,26 @@
 import requests
 import config
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, TypedDict, Union
+from typing import Dict, List, Optional, Any, Union
+from pydantic import BaseModel, ConfigDict
 
 CAL_API_V2_BASE_URL = "https://api.cal.com/v2"  # For event-types
 CAL_API_V1_BASE_URL = "https://api.cal.com/v1"  # For slots
 
-# --- TypedDict definitions for API responses ---
-class Location(TypedDict, total=False):
+# --- BaseModel definitions for API responses ---
+class Location(BaseModel):
+    model_config = ConfigDict(extra='allow')
     type: str
     address: str
     public: bool
 
-class SlotItem(TypedDict):
+class SlotItem(BaseModel):
     time: str
 
-class SlotsResponse(TypedDict):
+class SlotsResponse(BaseModel):
     slots: Dict[str, List[SlotItem]]
 
-class EventTypeDetail(TypedDict):
+class EventTypeDetail(BaseModel):
     """Type definition for event type details returned by get_event_type_details_v2."""
     id: int
     slug: str
@@ -29,12 +31,12 @@ class EventTypeDetail(TypedDict):
     requiresConfirmation: bool
     booking_url: str
 
-class BookingSuccessResponse(TypedDict):
+class BookingSuccessResponse(BaseModel):
     """Type definition for successful booking response."""
     success: bool  # Always True
     data: Dict[str, Any]  # The actual booking data from Cal.com API
 
-class BookingErrorResponse(TypedDict):
+class BookingErrorResponse(BaseModel):
     """Type definition for failed booking response."""
     success: bool  # Always False
     error: str  # Error message

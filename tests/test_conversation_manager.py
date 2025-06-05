@@ -1,135 +1,123 @@
 import pytest
-from conversation_manager import app, ConversationState
+from email_conversation_manager import app, EmailConversationState
+from email_conversation_manager.types import AvailableSlot, ChatMessage, Intent
+from services import cal_service, llm_service
+from datetime import datetime
 
-def test_conversation_workflow(monkeypatch, example_slots):
-    import conversation_manager
-    # Patch slot fetching to always return example_slots
-    monkeypatch.setattr(conversation_manager, "fetch_raw_slots", lambda event_type_id_v1: [slot["iso"] for slot in example_slots])
-    monkeypatch.setattr(conversation_manager, "select_slots", lambda raw_slots: example_slots)
-    monkeypatch.setattr(conversation_manager.cal_service, "get_event_type_details_v2", lambda user_cal_username, event_type_slug: {"id": 123})
-    monkeypatch.setattr(conversation_manager.cal_service, "create_booking", lambda *a, **kw: {"success": True, "data": {}})
-    monkeypatch.setattr(conversation_manager.llm_service, "parse_booked_slot", lambda user_input, available_slots, conversation_history: available_slots[0]["time"])
-    monkeypatch.setattr(conversation_manager.llm_service, "generate_intent_summary", lambda user_input, conversation_history, user_language: "Discuss AI solutions")
-    initial_state = conversation_manager.ConversationState(
-        user_input="Hi, I'd like to book a meeting.",
-        user_email="test@example.com",
-        user_name="Test User",
-        interaction_history=[],
-        event_type_slug="30min",
-        booking_link="https://cal.com/otl-user/30min"
-    )
-    final_state = conversation_manager.app.invoke(initial_state)
-    assert final_state["classified_intent"] == "REQUEST_BOOKING"
-    assert any("Generated response" in entry for entry in final_state["interaction_history"])
-    assert final_state.get("booked_slot") == example_slots[0]["time"]
-    assert example_slots[0]["time"] in final_state.get("generated_response", "")
-
-
-def test_question_services_workflow():
-    initial_state = ConversationState(
-        user_input="How much would developing custom AI customer service bot cost us?",
-        user_email="test@example.com",
-        user_name="Test User",
-        interaction_history=[],
-        event_type_slug="30min",
-        booking_link="https://cal.com/otl-user/30min"
-    )
-    final_state = app.invoke(initial_state)
-    assert final_state["classified_intent"] == "QUESTION_SERVICES"
-    assert any("Generated response" in entry for entry in final_state["interaction_history"])
-    assert "booking" in final_state["generated_response"].lower() or "varaus" in final_state["generated_response"].lower()
-
-
-def test_booking_meeting_workflow(monkeypatch, example_slots):
-    import conversation_manager
-    monkeypatch.setattr(conversation_manager, "fetch_raw_slots", lambda event_type_id_v1: [slot["iso"] for slot in example_slots])
-    monkeypatch.setattr(conversation_manager, "select_slots", lambda raw_slots: example_slots)
-    monkeypatch.setattr(conversation_manager.cal_service, "get_event_type_details_v2", lambda user_cal_username, event_type_slug: {"id": 123})
-    monkeypatch.setattr(conversation_manager.cal_service, "create_booking", lambda *a, **kw: {"success": True, "data": {}})
-    monkeypatch.setattr(conversation_manager.llm_service, "parse_booked_slot", lambda user_input, available_slots, conversation_history: available_slots[0]["time"])
-    monkeypatch.setattr(conversation_manager.llm_service, "generate_intent_summary", lambda user_input, conversation_history, user_language: "Discuss AI solutions")
-    initial_state = conversation_manager.ConversationState(
-        user_input="I would like to book a meeting with Olli",
-        user_email="test@example.com",
-        user_name="Test User",
-        interaction_history=[],
-        event_type_slug="30min",
-        booking_link="https://cal.com/otl-user/30min"
-    )
-    final_state = conversation_manager.app.invoke(initial_state)
-    assert final_state["classified_intent"] == "REQUEST_BOOKING"
-    assert any("Generated response" in entry for entry in final_state["interaction_history"])
-    assert final_state.get("booked_slot") == example_slots[0]["time"]
-    assert example_slots[0]["time"] in final_state.get("generated_response", "")
+@pytest.fixture
+def mock_services(monkeypatch, example_slots):
+    # Mock cal_service
+    monkeypatch.setattr(cal_service, "get_available_slots_v1", lambda *a, **kw: [slot["iso"] for slot in example_slots])
+    monkeypatch.setattr(cal_service, "get_event_type_details_v2", lambda *a, **kw: {"id": 123})
+    monkeypatch.setattr(cal_service, "create_booking", lambda *a, **kw: {"success": True, "data": {}})
+    
+    # Mock llm_service
+    def mock_parse_booked_slot(*args, **kwargs):
+        # Return a datetime object for selected_slot to match the real code's matching logic
+        slot_iso = example_slots[0]["iso"]
+        slot_dt = datetime.fromisoformat(slot_iso.replace("Z", "+00:00"))
+        return llm_service.SlotSelection(
+            confidence=1.0,
+            selected_slot=slot_dt
+        )
+    monkeypatch.setattr(llm_service, "parse_booked_slot", mock_parse_booked_slot)
+    monkeypatch.setattr(llm_service, "classify_user_intent", lambda *a, **kw: Intent.REQUEST_BOOKING)
+    monkeypatch.setattr(llm_service, "generate_contextual_response", lambda *a, **kw: "Generated response")
 
 @pytest.fixture
 def example_slots():
     return [
-        {"time": "Tuesday, 01.07. at 13:00", "iso": "2025-07-01T10:00:00Z"},
-        {"time": "Tuesday, 01.07. at 14:00", "iso": "2025-07-01T11:00:00Z"}
+        {"time": "Tuesday, 01.07. at 13:00", "iso": "2025-07-01T13:00:00.000+03:00"},
+        {"time": "Wednesday, 02.07. at 14:00", "iso": "2025-07-02T14:00:00.000+03:00"}
     ]
 
-def test_workflow_service_question(example_slots):
-    state = ConversationState(
+def test_request_booking_flow(mock_services, example_slots):
+    """Test the basic conversation flow through the graph."""
+    initial_state = EmailConversationState(
+        thread_id="test-thread-1",
+        user_input="Hi, I'd like to book a meeting.",
+        user_email="test@example.com",
+        user_name="Test User",
+        previous_chat_history=[],
+        appended_chat_history=[],
+        event_type_slug="30min",
+        booking_link="https://cal.com/otl-user/30min"
+    )
+    
+    final_state = app.invoke(initial_state)
+    
+    # Verify the state transitions
+    assert final_state["classified_intent"] == Intent.REQUEST_BOOKING
+    assert any("Generated response" in entry.content for entry in final_state["appended_chat_history"])
+    assert len(final_state["available_slots"]) == len(example_slots)
+
+def test_service_question_flow(mock_services, example_slots):
+    """Test the flow when user asks about services."""
+    # Override the intent classification for this test
+    import services.llm_service as llm_service
+    llm_service.classify_user_intent = lambda *a, **kw: Intent.QUESTION_SERVICES
+    
+    initial_state = EmailConversationState(
+        thread_id="test-thread-2",
         user_input="How much would developing custom AI customer service bot cost us?",
-        user_email="example@gmail.com",
-        user_name="Debug User",
-        interaction_history=[],
+        user_email="test@example.com",
+        user_name="Test User",
+        previous_chat_history=[],
+        appended_chat_history=[],
         event_type_slug="30min",
-        booking_link="https://cal.com/otl-fi/30min",
-        available_slots=example_slots
+        booking_link="https://cal.com/otl-user/30min"
     )
-    final_state = app.invoke(state)
-    assert final_state.get("classified_intent") in [
-        "QUESTION_SERVICES",
-        "REQUEST_BOOKING"
-    ]
-    assert "booking link" in final_state.get("generated_response", "") or "varauslinkkiä" in final_state.get("generated_response", "")
+    
+    final_state = app.invoke(initial_state)
+    
+    assert final_state["classified_intent"] == Intent.QUESTION_SERVICES
+    assert len(final_state["available_slots"]) == len(example_slots)
+    assert any("Generated response" in entry.content for entry in final_state["appended_chat_history"])
 
-def test_workflow_booking(example_slots):
-    # Simulate a follow-up booking
-    state = ConversationState(
-        user_input="I'd like to book the first available slot.",
-        user_email="example@gmail.com",
-        user_name="Debug User",
-        interaction_history=["User: How much would developing custom AI customer service bot cost us?", "System: Fetched 2 available slots."],
+def test_book_a_meeting_flow(mock_services, example_slots):
+    """Test the booking flow with available slots."""
+    import services.llm_service as llm_service
+    llm_service.classify_user_intent = lambda *a, **kw: Intent.BOOK_A_MEETING
+    
+    initial_state = EmailConversationState(
+        thread_id="test-thread-3",
+        user_input="I would like to book next available meeting",
+        user_email="test@example.com",
+        user_name="Test User",
+        previous_chat_history=[
+            ChatMessage(role="user", content="Hi, I'd like to book a meeting."),
+            ChatMessage(role="assistant", content="Generated response"),
+        ],
+        appended_chat_history=[],
         event_type_slug="30min",
-        booking_link="https://cal.com/otl-fi/30min",
-        available_slots=example_slots
+        booking_link="https://cal.com/otl-user/30min",
+        available_slots=[AvailableSlot(time=slot["time"], iso=slot["iso"]) for slot in example_slots]
     )
-    final_state = app.invoke(state)
-    # Should either book or ask for clarification
-    assert final_state.get("classified_intent") in [
-        "REQUEST_BOOKING",
-        "QUESTION_SERVICES"
-    ]
-    # The response should mention a booking or an error
-    assert "booked" in final_state.get("generated_response", "") or "couldn't determine" in final_state.get("generated_response", "")
+    
+    final_state = app.invoke(initial_state)
+    
+    assert final_state["classified_intent"] == Intent.BOOK_A_MEETING
+    assert final_state.get("booked_slot") == AvailableSlot(time=example_slots[0]["time"], iso=example_slots[0]["iso"])
+    assert "booked" in final_state.get("generated_response").lower()
 
-def test_booking_sets_booked_slot_and_confirmation(example_slots, monkeypatch):
-    # Patch cal_service.create_booking to always succeed and not hit the real API
-    import conversation_manager
-    def fake_create_booking(api_key, event_type_id, slot_time, user_email, user_name=None, event_type_slug=None, username=None, time_zone="Europe/Helsinki", language="en", notes=None):
-        return {"success": True, "data": {}}
-    monkeypatch.setattr(conversation_manager.cal_service, "create_booking", fake_create_booking)
-    # Patch cal_service.get_event_type_details_v2 to return a fake event type id
-    monkeypatch.setattr(conversation_manager.cal_service, "get_event_type_details_v2", lambda user_cal_username, event_type_slug: {"id": 123})
-    # Patch llm_service.parse_booked_slot to always select the first slot
-    monkeypatch.setattr(conversation_manager.llm_service, "parse_booked_slot", lambda user_input, available_slots, conversation_history: available_slots[0]["time"])
-    # Patch llm_service.generate_intent_summary to return a static summary
-    monkeypatch.setattr(conversation_manager.llm_service, "generate_intent_summary", lambda user_input, conversation_history, user_language: "Discuss AI solutions")
-
-    state = conversation_manager.ConversationState(
-        user_input="I'd like to book the first available slot.",
-        user_email="example@gmail.com",
-        user_name="Debug User",
-        interaction_history=["User: How much would developing custom AI customer service bot cost us?", "System: Fetched 2 available slots."],
+def test_unsure_intent_flow(mock_services):
+    """Test the flow when the intent is unclear."""
+    # Override the intent classification for this test
+    import services.llm_service as llm_service
+    llm_service.classify_user_intent = lambda *a, **kw: Intent.UNSURE
+    
+    initial_state = EmailConversationState(
+        thread_id="test-thread-4",
+        user_input="I'm not sure what I want",
+        user_email="test@example.com",
+        user_name="Test User",
+        previous_chat_history=[],
+        appended_chat_history=[],
         event_type_slug="30min",
-        booking_link="https://cal.com/otl-fi/30min",
-        available_slots=example_slots
+        booking_link="https://cal.com/otl-user/30min"
     )
-    final_state = conversation_manager.app.invoke(state)
-    # Check that the slot was booked and the confirmation message uses the slot string
-    assert final_state.get("booked_slot") == example_slots[0]["time"]
-    assert "booked for" in final_state.get("generated_response", "")
-    assert example_slots[0]["time"] in final_state.get("generated_response", "")
+    
+    final_state = app.invoke(initial_state)
+    
+    assert final_state["classified_intent"] == Intent.UNSURE
+    assert any("Generated response" in entry.content for entry in final_state["appended_chat_history"])

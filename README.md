@@ -9,6 +9,10 @@ This project is an AI-powered email assistant that automatically responds to cus
     *   Access to Google Cloud Platform and a project with Gmail API enabled.
     *   API key for Google Gemini.
     *   A Cal.com account for meeting bookings.
+    *   (Optional) Voice functionality requires additional setup:
+        - Google Cloud Speech-to-Text API enabled
+        - Google Cloud Text-to-Speech API enabled
+        - Appropriate API credentials configured
 
 2.  **Clone the Repository (if applicable):**
     ```bash
@@ -41,6 +45,10 @@ This project is an AI-powered email assistant that automatically responds to cus
     - Place your Gmail OAuth credentials in `secrets/gmail_credentials.json` (see Google Cloud docs for format).
     - Place your Gemini and Cal.com API keys in `secrets/credentials.json` as shown above.
     - Edit `config.py` if you need to change the assistant email or Cal.com settings.
+    - For voice functionality, ensure the following environment variables are set:
+        - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
+        - `GOOGLE_APPLICATION_CREDENTIALS`: Path to your Google Cloud credentials file
+        - `ENABLE_VOICE`: Set to "true" to enable voice functionality
 
 ## Running the Bot
 
@@ -62,9 +70,18 @@ This project uses `pytest` for testing. To run all tests:
 
 2. **Run tests:**
    ```bash
+   # Run all tests
    pytest
+   
+   # Run specific test categories
+   pytest tests/test_state_service.py  # State management tests
+   pytest tests/test_conversation_manager.py  # Conversation flow tests
+   pytest tests/test_llm_service.py  # LLM service tests
+   pytest tests/test_assistant.py  # Assistant integration tests
    ```
    This will discover and run all tests in the `tests/` directory.
+
+   Note: Some tests require specific environment variables to be set. Check the test files for required variables.
 
 ---
 
@@ -90,4 +107,11 @@ When adding new packages, install them using `pip install <package-name>` (ideal
 - Harden error handling and logging for production
 - Add more integration and end-to-end tests
 - Update documentation for production setup and GCP deployment 
-- Integrate with voice funtionality
+- Future Features:
+  - Voice functionality integration:
+    - Implement speech-to-text for voice messages
+    - Add text-to-speech for voice responses
+    - Support multiple languages
+    - Implement voice message caching
+    - Add voice quality metrics
+    - Optimize voice processing performance

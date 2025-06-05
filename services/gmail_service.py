@@ -107,23 +107,41 @@ def parse_email_details(message_payload: Dict[str, Any]) -> Optional[Dict[str, s
         message_payload: The 'payload' part of a Gmail message resource.
 
     Returns:
-        A dictionary with 'sender', 'subject', and 'body', or None if parsing fails.
+        A dictionary with 'sender_name', 'sender_email', 'recipient_name', 'recipient_email', 'subject', and 'body', or None if parsing fails.
     """
     if not message_payload:
         return None
 
     headers = message_payload.get('headers', [])
     subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
-    from_header = next((h['value'] for h in headers if h['name'].lower() == 'from'), '')
     
-    # Extract email address from "From" header (e.g., "Some Name <email@example.com>")
-    match = re.search(r'<([^>]+)>', from_header)
-    sender = match.group(1) if match else from_header # Fallback to full header if no <>
+    # Parse From header
+    from_header = next((h['value'] for h in headers if h['name'].lower() == 'from'), '')
+    from_match = re.match(r'^"?([^"<]+)"?\s*<([^>]+)>$', from_header)
+    if from_match:
+        sender_name = from_match.group(1).strip()
+        sender_email = from_match.group(2)
+    else:
+        sender_name = ''
+        sender_email = from_header.strip()
+    
+    # Parse To header
+    to_header = next((h['value'] for h in headers if h['name'].lower() == 'to'), '')
+    to_match = re.match(r'^"?([^"<]+)"?\s*<([^>]+)>$', to_header)
+    if to_match:
+        recipient_name = to_match.group(1).strip()
+        recipient_email = to_match.group(2)
+    else:
+        recipient_name = ''
+        recipient_email = to_header.strip()
 
     body = get_email_body_text(message_payload)
 
     return {
-        'sender': sender,
+        'sender_name': sender_name,
+        'sender_email': sender_email,
+        'recipient_name': recipient_name,
+        'recipient_email': recipient_email,
         'subject': subject,
         'body': body
     }
@@ -206,7 +224,7 @@ if __name__ == '__main__':
                     if full_message_details and full_message_details.get('payload'):
                         parsed_content = parse_email_details(full_message_details['payload'])
                         if parsed_content:
-                            print(f"      Parsed Sender: {parsed_content['sender']}")
+                            print(f"      Parsed Sender: {parsed_content['sender_name']} <{parsed_content['sender_email']}>")
                             print(f"      Parsed Subject: {parsed_content['subject']}")
                             print(f"      Parsed Body Preview: {parsed_content['body'][:200]}...") # Preview first 200 chars
                     
