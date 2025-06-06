@@ -53,7 +53,6 @@ def _safe_generate_content(intent_specific_instructions: str, history: list[Chat
         if not any(isinstance(msg, HumanMessage) for msg in chat_history):
             chat_history.append(HumanMessage(content="Please provide a response."))
         
-        print(f"[DEBUG] Chat history: {chat_history}")
         # Get response from model
         response = llm_model.invoke(chat_history)
         
