@@ -6,6 +6,7 @@ This project is an AI-powered email assistant that automatically responds to cus
 
 1.  **Prerequisites:**
     *   Python 3.8+ installed.
+    *   Google Workspace account (Business Starter or higher)
     *   Access to Google Cloud Platform and a project with Gmail API enabled.
     *   API key for Google Gemini.
     *   A Cal.com account for meeting bookings.
@@ -14,13 +15,29 @@ This project is an AI-powered email assistant that automatically responds to cus
         - Google Cloud Text-to-Speech API enabled
         - Appropriate API credentials configured
 
-2.  **Clone the Repository (if applicable):**
+2.  **Google Workspace Setup:**
+    *   Sign up for Google Workspace (Business Starter or higher)
+    *   Create a new user account for the AI assistant (e.g., assistant@yourdomain.com)
+    *   Set up email forwarding rules if needed
+    *   Ensure the account has proper permissions for Gmail API access
+
+3.  **Google Cloud Platform Setup:**
+    *   Create a new project in Google Cloud Console
+    *   Enable the following APIs:
+        - Gmail API
+        - Google Gemini API
+        - (Optional) Cloud Speech-to-Text API
+        - (Optional) Cloud Text-to-Speech API
+    *   Create OAuth 2.0 credentials for Gmail API
+    *   Download the credentials and save as `secrets/gmail_credentials.json`
+
+4.  **Clone the Repository (if applicable):**
     ```bash
     git clone <your-repository-url>
     cd ai-receptionist
     ```
 
-3.  **Create and Activate Virtual Environment:**
+5.  **Create and Activate Virtual Environment:**
     Open PowerShell or Command Prompt in the project directory (`ai-receptionist`):
     ```powershell
     # Create the virtual environment
@@ -32,7 +49,7 @@ This project is an AI-powered email assistant that automatically responds to cus
     *(For Command Prompt, activation is `.venv\Scripts\activate.bat`)*
     Your terminal prompt should change to indicate the active virtual environment (e.g., `(.venv) PS C:\path\to\ai-receptionist>`).
 
-4.  **Install Dependencies:**
+6.  **Install Dependencies:**
     Once the virtual environment is created (and ideally activated in your local terminal), install the required packages using:
     ```bash
     # Ensure you are in the project root directory
@@ -41,10 +58,20 @@ This project is an AI-powered email assistant that automatically responds to cus
     .venv\Scripts\pip.exe install -r requirements.txt
     ```
 
-5.  **Configuration:**
+7.  **Configuration:**
     - Place your Gmail OAuth credentials in `secrets/gmail_credentials.json` (see Google Cloud docs for format).
-    - Place your Gemini and Cal.com API keys in `secrets/credentials.json` as shown above.
-    - Edit `config.py` if you need to change the assistant email or Cal.com settings.
+    - Create `secrets/credentials.json` with the following structure:
+      ```json
+      {
+          "GOOGLE_GEMINI_API_KEY": "your-gemini-api-key",
+          "CAL_COM_API_KEY": "your-cal-com-api-key"
+      }
+      ```
+    - Edit `config.py` to update:
+      - `ASSISTANT_EMAIL`: Set to your Google Workspace assistant email
+      - `CAL_COM_USERNAME`: Your Cal.com username
+      - `CAL_COM_EVENT_TYPE_SLUG`: Your meeting type slug
+      - `SKIP_SENDING_EMAILS`: Set to `False` for production use
     - For voice functionality, ensure the following environment variables are set:
         - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
         - `GOOGLE_APPLICATION_CREDENTIALS`: Path to your Google Cloud credentials file
@@ -98,6 +125,28 @@ When adding new packages, install them using `pip install <package-name>` (ideal
 
 ## TODO / Next Steps
 
+### Monday Deployment Plan
+1. **Google Workspace Setup (Priority)**
+   - [ ] Sign up for Google Workspace Business Starter
+   - [ ] Create assistant@yourdomain.com account
+   - [ ] Configure email forwarding rules
+   - [ ] Set up proper Gmail API permissions
+
+2. **Google Cloud Platform Configuration**
+   - [ ] Create new GCP project
+   - [ ] Enable required APIs:
+     - Gmail API
+     - Google Gemini API
+   - [ ] Generate and download OAuth credentials
+   - [ ] Set up proper IAM permissions
+
+3. **Application Deployment**
+   - [ ] Update config.py with new credentials
+   - [ ] Test email sending functionality
+   - [ ] Verify Cal.com integration
+   - [ ] Deploy to production environment
+
+### Future Development
 - Prepare for production deployment on Google Cloud Platform (GCP):
   - Containerize the app (Dockerfile, requirements.txt, etc.)
   - Set up GCP Cloud Run or App Engine deployment
