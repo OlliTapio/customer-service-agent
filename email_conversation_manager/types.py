@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import StrEnum, auto
+from enum import StrEnum, auto, Enum
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -27,8 +27,13 @@ class Intent(StrEnum):
 # List of all possible intent values as strings
 POSSIBLE_INTENTS = [intent.value for intent in Intent]
 
+class MessageRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
 class ChatMessage(BaseModel):
-    role: str
+    role: MessageRole
     content: str
 
 

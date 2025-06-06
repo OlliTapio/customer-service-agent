@@ -33,12 +33,12 @@ class EmailController(BaseController):
         if not email_details:
             return
 
-        subject = email_details.get('subject', 'No subject')
-
         # Parse email information
         parsed_info = self._parse_email_details(email_details)
         if not parsed_info:
             return
+
+        subject = parsed_info.get('subject', 'No subject')
 
         # Create or fetch conversation state
         state = self._prepare_conversation_state(

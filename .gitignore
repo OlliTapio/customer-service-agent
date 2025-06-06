@@ -5,3 +5,4 @@
 token.json
 #ignore all __pycache__ folders
 __pycache__/
+conversations.db

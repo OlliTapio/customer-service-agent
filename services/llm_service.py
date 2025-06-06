@@ -5,7 +5,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from pydantic import BaseModel, Field
 import config
-from email_conversation_manager.types import POSSIBLE_INTENTS, AvailableSlot, ChatMessage, Intent
+from email_conversation_manager.types import POSSIBLE_INTENTS, AvailableSlot, ChatMessage, Intent, MessageRole
 
 # Initialize the LangChain model
 def get_llm_instance() -> Optional[ChatGoogleGenerativeAI]:
@@ -42,15 +42,18 @@ def _safe_generate_content(intent_specific_instructions: str, history: list[Chat
         # Convert ChatMessage to appropriate langchain message type
         if history:
             for msg in history:
-                if msg.role == "user":
+                if msg.role == MessageRole.USER:
                     chat_history.append(HumanMessage(content=msg.content))
-                elif msg.role == "assistant":
+                elif msg.role == MessageRole.ASSISTANT:
                     chat_history.append(AIMessage(content=msg.content))
+                elif msg.role == MessageRole.SYSTEM:
+                    chat_history.append(SystemMessage(content=msg.content))
         
         # Ensure we have at least one human message
         if not any(isinstance(msg, HumanMessage) for msg in chat_history):
             chat_history.append(HumanMessage(content="Please provide a response."))
         
+        print(f"[DEBUG] Chat history: {chat_history}")
         # Get response from model
         response = llm_model.invoke(chat_history)
         
@@ -123,8 +126,8 @@ Available intents: {', '.join(POSSIBLE_INTENTS)}""")
 SYSTEM_INSTRUCTIONS = "You are Olli's Personal Assistant for OTL.fi. Always be professional, concise, and helpful."
 
 BOOKING_TEMPLATES = {
-    "en": "Hi {user_name},\n\nHere are the next available 30-minute time slots for a call with Olli (all times Helsinki/EEST):\n\n{slots}\n\nIf none of these work, you can suggest another time or use our booking link: {booking_link}\n\nLooking forward to your reply!\nOlli's Personal Assistant",
-    "fi": "Hei {user_name},\n\nTässä seuraavat vapaat 30 minuutin ajat keskustelulle Ollin kanssa (ajat Helsinki/EEST):\n\n{slots}\n\nJos mikään näistä ei sovi, voit ehdottaa toista aikaa tai käyttää varauslinkkiä: {booking_link}\n\nOdotan vastaustasi!\nOllin henkilökohtainen assistentti"
+    "en": "Here are the next available 30-minute time slots for a call with Olli (all times Helsinki/EEST):\n\n{slots}\n\nIf none of these work, you can suggest another time or use our booking link: {booking_link}",
+    "fi": "Tässä seuraavat vapaat 30 minuutin ajat keskustelulle Ollin kanssa (ajat Helsinki/EEST):\n\n{slots}\n\nJos mikään näistä ei sovi, voit ehdottaa toista aikaa tai käyttää varauslinkkiä: {booking_link}"
 }
 
 def translate_text(text: str, target_language: str) -> str:
@@ -149,6 +152,41 @@ def generate_greeting_response(user_name: str, user_language: str, conversation_
             f"Conversation history:\n{history_str}\n" \
             f"The user sent a greeting. Respond politely and greet the user{name_part} Ask how you can help them today. Reply in {user_language if user_language else 'English'}."
     return _safe_generate_content(prompt) or f"Hello{name_part}! How can I help you today?"
+
+def _format_prompt(
+    main_instructions: list[str],
+    user_language: str = None,
+    user_name: str = None,
+    include_template: bool = False,
+    template_content: str = None
+) -> str:
+    """
+    Helper function to format prompts with consistent structure.
+    
+    Args:
+        main_instructions: List of main instruction points
+        user_language: User's preferred language
+        user_name: User's name if available
+        include_template: Whether to include a template in the response
+        template_content: The template content to include if include_template is True
+    """
+    prompt_parts = ["Your response should:"]
+    
+    # Add main instructions
+    for i, instruction in enumerate(main_instructions, 1):
+        prompt_parts.append(f"{i}. {instruction}")
+    
+    # Add template if needed
+    if include_template and template_content:
+        prompt_parts.append(f"\nTEMPLATE TO INCLUDE:\n{template_content}")
+    
+    # Add common instructions
+    prompt_parts.append(f"\nAdditional requirements:")
+    prompt_parts.append(f"1. Be in {user_language if user_language else 'English'}")
+    prompt_parts.append(f"2. Start with a greeting using the user's name if available")
+    prompt_parts.append(f"3. End with an email signature. You are Olli's Personal Assistant")
+    
+    return "\n".join(prompt_parts)
 
 def generate_contextual_response(
     intent: str,
@@ -178,65 +216,140 @@ def generate_contextual_response(
         # For booking requests, just use the template directly
         slots_str = "\n".join(f"- {slot.time}" for slot in available_slots) if available_slots else "(No available slots)"
         booking_msg = BOOKING_TEMPLATES[language].format(
-            user_name=user_name or "there",
             slots=slots_str,
             booking_link=booking_link
         )
         if user_language not in BOOKING_TEMPLATES:
             booking_msg = translate_text(booking_msg, user_language)
-        return booking_msg
+        
+        # Format the complete response with greeting and signature
+        greeting = f"Hi {user_name}," if user_name else "Hi there,"
+        return f"{greeting}\n\n{booking_msg}\n\nLooking forward to your reply!\nOlli's Personal Assistant"
 
     elif intent == Intent.QUESTION_SERVICES:
         # Format slots properly
         slots_str = "\n".join(f"- {slot.time}" for slot in available_slots) if available_slots else "(No available slots)"
         booking_msg = BOOKING_TEMPLATES[language].format(
-            user_name=user_name or "there",
             slots=slots_str,
             booking_link=booking_link
         )
         if user_language not in BOOKING_TEMPLATES:
             booking_msg = translate_text(booking_msg, user_language)
 
-        prompt = f"""You are Olli's Personal Assistant for OTL.fi. Provide a concise and helpful answer about our services.
-Include the booking template in your response.
-
-INFORMATION ABOUT OTL.FI:
-{website_info}
-
-BOOKING TEMPLATE TO INCLUDE:
-{booking_msg}
-
-Your response should:
-1. Briefly explain what OTL.fi does
-2. Include the booking template exactly as provided
-3. Be professional and helpful
-4. Be in {user_language if user_language else 'English'}"""
+        main_instructions = [
+            "Briefly explain what OTL.fi does",
+            "Include the booking template exactly as provided",
+            "Be professional and helpful"
+        ]
+        
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name,
+            include_template=True,
+            template_content=booking_msg
+        )
 
         return _safe_generate_content(prompt, conversation_history)
 
     elif intent == Intent.GREETING:
-        prompt =  f"The user sent a greeting. Respond politely and greet the user {user_name} Ask how you can help them today. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "Respond politely and greet the user",
+            "Ask how you can help them today"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.PROVIDE_INFO:
-        prompt = f"Acknowledge receipt of the information. If this completes a previous request from you (e.g. asking for their email or name), confirm that. Decide the next natural step, which might be to proceed with a booking if that was the prior intent, or ask if there's anything else you can help with. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "Acknowledge receipt of the information",
+            "If this completes a previous request (e.g. asking for their email or name), confirm that",
+            "Decide the next natural step, which might be to proceed with a booking if that was the prior intent, or ask if there's anything else you can help with"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.FOLLOW_UP:
-        prompt = f"Check the conversation history to understand the context. Respond appropriately to their follow-up. If it's about a booking, re-iterate options or check status if possible (currently not possible). Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "Check the conversation history to understand the context",
+            "Respond appropriately to their follow-up",
+            "If it's about a booking, re-iterate options or check status if possible (currently not possible)"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.NOT_INTERESTED_BUYING:
-        prompt = f"The user has indicated they are not interested in buying OTL.fi's services. Respond politely, thank them for their time, and perhaps mention they can reach out in the future if their needs change. Do not push for a booking. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "The user has indicated they are not interested in buying OTL.fi's services",
+            "Respond politely and thank them for their time",
+            "Mention they can reach out in the future if their needs change",
+            "Do not push for a booking"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.INTERESTED_SELLING_TO_US:
-        prompt = f"The user seems interested in SELLING their products/services TO OTL.fi. Politely inform them that OTL.fi is not currently looking to procure such services/products. Thank them for their interest. Do NOT offer to book a call for this intent. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "The user seems interested in SELLING their products/services TO OTL.fi",
+            "Acknowledge their specific service/product offering (e.g., SEO, marketing, etc.)",
+            "Politely inform them that OTL.fi is not currently looking to procure such services/products",
+            "Thank them for their interest",
+            "Do NOT offer to book a call for this intent",
+            "Keep the response professional but personal, acknowledging their specific business and offering"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.UNSURE:
-        prompt = f"The user's intent is unclear from their latest message. Politely ask for clarification on how you can help them. You can also offer the booking link ({booking_link}) if they'd like to discuss their needs with Olli. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "The user's intent is unclear from their latest message",
+            "Politely ask for clarification on how you can help them",
+            f"You can also offer the booking link ({booking_link}) if they'd like to discuss their needs with Olli"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     elif intent == Intent.BOOK_A_MEETING:
-        prompt = f"The user wanted to book a meeting. We encountered an error while booking the meeting. Provice the user with the booking link ({booking_link}) and ask if they'd like to try again. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            "The user wanted to book a meeting",
+            "We encountered an error while booking the meeting",
+            f"Provide the user with the booking link ({booking_link}) and ask if they'd like to try again"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     else:
-        prompt = f"The user's intent was classified as '{intent}', but no specific response guidance is available. Use your best judgment to respond to the latest message based on the conversation history and general knowledge. If in doubt, offer to book a call: {booking_link}. Reply in {user_language if user_language else 'English'}."
+        main_instructions = [
+            f"The user's intent was classified as '{intent}', but no specific response guidance is available",
+            "Use your best judgment to respond to the latest message based on the conversation history and general knowledge",
+            f"If in doubt, offer to book a call: {booking_link}"
+        ]
+        prompt = _format_prompt(
+            main_instructions=main_instructions,
+            user_language=user_language,
+            user_name=user_name
+        )
 
     return _safe_generate_content(prompt, conversation_history)
 

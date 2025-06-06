@@ -7,7 +7,7 @@ import services.llm_service as llm_service
 import services.cal_service as cal_service
 import config
 
-from .types import ChatMessage, EmailConversationState, Intent
+from .types import ChatMessage, EmailConversationState, Intent, MessageRole
 
 def new_interaction(state: EmailConversationState) -> EmailConversationState:
     """Handles the initialization of a new interaction."""
@@ -31,7 +31,7 @@ def new_interaction(state: EmailConversationState) -> EmailConversationState:
         print(f"Initialized booking_link: {state.booking_link}")
 
     if state.user_input:
-        state.appended_chat_history.append(ChatMessage(role="User", content=state.user_input))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.USER, content=state.user_input))
         try:
             state.user_language = detect(state.user_input)
         except Exception:
@@ -51,7 +51,7 @@ def classify_intent_node(state: EmailConversationState) -> EmailConversationStat
     if not state.user_input:
         state.error_message = "No user input to classify."
         state.classified_intent = Intent.UNSURE
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I encountered an error: {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I encountered an error: {state.error_message}"))
         return state
 
     try:
@@ -60,13 +60,13 @@ def classify_intent_node(state: EmailConversationState) -> EmailConversationStat
             conversation_history=state.previous_chat_history
         )
         state.classified_intent = intent
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I have classified the user's intent as {intent}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I have classified the user's intent as {intent}"))
         print(f"Classified intent: {intent}")
     except Exception as e:
         print(f"Error during intent classification: {e}")
         state.error_message = f"Failed to classify intent: {e}"
         state.classified_intent = Intent.UNSURE
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I encountered an error while classifying intent: {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I encountered an error while classifying intent: {state.error_message}"))
     return state
 
 def gather_information_node(state: EmailConversationState) -> EmailConversationState:
@@ -89,7 +89,7 @@ def gather_information_node(state: EmailConversationState) -> EmailConversationS
                 selected_slots = select_slots(raw_slots)
                 formatted_slots = format_slots(selected_slots, state.user_language or "en")
                 state.available_slots = formatted_slots
-                state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Fetched {len(formatted_slots)} available slots: {formatted_slots}"))
+                state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"Fetched {len(formatted_slots)} available slots: {formatted_slots}"))
                 print(f"Fetched {len(formatted_slots)} available slots: {formatted_slots}")
             else:
                 return set_error_and_return(state, f"Could not fetch V2 event details or ID for slug {event_slug_to_use} to get V1 slots.")
@@ -103,7 +103,7 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
     available_slots = state.available_slots or []
     if not available_slots:
         state.error_message = "No available slots to book."
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"Error - {state.error_message}"))
         return state
 
     user_input = state.user_input or ""
@@ -119,7 +119,7 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
 
     if selected_slot.confidence < 0.7:
         state.error_message = "Failed to parse suitable slot for the booking."
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"Error - {state.error_message}"))
         return state
 
     # Match the selected slot to the available slots
@@ -146,7 +146,7 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
             parsed = parse_iso(slot.iso)
             print(f"  - {slot.iso} -> {parsed} (type: {type(parsed)})")
         state.error_message = "Could not find the selected slot in the available slots."
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"Error - {state.error_message}"))
         return state
 
     event_details = cal_service.get_event_type_details_v2(
@@ -179,10 +179,10 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
 
         if booked_slot:
             state.booked_slot = booked_slot
-            state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I have successfully booked a meeting slot for {booked_slot.time} for {state.user_email}"))
+            state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I have successfully booked a meeting slot for {booked_slot.time} for {state.user_email}"))
         else:
             state.error_message = "Could not book the selected slot."
-            state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I encountered an error while booking the slot: {state.error_message}"))
+            state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I encountered an error while booking the slot: {state.error_message}"))
 
     return state
 
@@ -192,7 +192,7 @@ def generate_response_node(state: EmailConversationState) -> EmailConversationSt
     if not state.classified_intent:
         state.generated_response = "I'm sorry, I wasn't able to understand your request. Could you please rephrase?"
         state.error_message = "Cannot generate response: Intent not classified."
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"Error - {state.error_message}"))
         return state
     # If a meeting was booked, use a template for the confirmation
     if state.booked_slot:
@@ -200,7 +200,7 @@ def generate_response_node(state: EmailConversationState) -> EmailConversationSt
         slot_str = state.booked_slot.time
         confirmation = f"Hi{f' {user_name}' if user_name else ''},\n\nYour meeting has been booked for {slot_str}. You will receive a confirmation email shortly.\n\nBest regards,\nOlli's Personal Assistant"
         state.generated_response = confirmation
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I have generated a booking confirmation message for the meeting scheduled at {slot_str}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I have generated a booking confirmation message for the meeting scheduled at {slot_str}"))
         return state
     # Otherwise, use the normal contextual response logic
     try:
@@ -215,7 +215,7 @@ def generate_response_node(state: EmailConversationState) -> EmailConversationSt
             website_info="OTL.fi provides AI audit and implementation for companies interested in freeing time in their organisation from menial work. For detailed discussions, a call is recommended."
         )
         state.generated_response = response_text
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I have generated a response based on the user's intent and context: {response_text}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I have generated a response based on the user's intent and context: {response_text}"))
         print(f"Generated response: {response_text}")
     except Exception as e:
         print(f"Error during response generation: {e}")
@@ -224,7 +224,7 @@ def generate_response_node(state: EmailConversationState) -> EmailConversationSt
             "I apologize, I encountered an error while trying to generate a response. "
             "Please try again or contact us directly."
         )
-        state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I encountered an error while generating a response: {state.error_message}"))
+        state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I encountered an error while generating a response: {state.error_message}"))
     return state
 
 def end_interaction_node(state: EmailConversationState) -> EmailConversationState:
@@ -235,7 +235,7 @@ def end_interaction_node(state: EmailConversationState) -> EmailConversationStat
     state.last_updated = datetime.now().isoformat()
     
     # Add final system message
-    state.appended_chat_history.append(ChatMessage(role="Assistant", content="I have completed processing this interaction"))
+    state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content="I have completed processing this interaction"))
     
     print("Interaction ended.")
     return state
@@ -250,7 +250,7 @@ def get_event_type_slug_from_state_or_config(state: EmailConversationState) -> s
 def set_error_and_return(state: EmailConversationState, error_msg: str) -> EmailConversationState:
     print(error_msg)
     state.error_message = error_msg
-    state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"I encountered an error: {error_msg}"))
+    state.appended_chat_history.append(ChatMessage(role=MessageRole.ASSISTANT, content=f"I encountered an error: {error_msg}"))
     state.available_slots = []
     return state
 
