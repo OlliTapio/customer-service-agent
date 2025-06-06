@@ -1,9 +1,9 @@
 # llm_service.py
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
-from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from pydantic import BaseModel, Field
 import config
 from email_conversation_manager.types import POSSIBLE_INTENTS, AvailableSlot, ChatMessage, Intent
 
@@ -34,11 +34,22 @@ def _safe_generate_content(intent_specific_instructions: str, history: list[Chat
         print("LLM model not initialized. Cannot generate content.")
         return None
     try:
-            # Create system and human messages
+        # Create system and human messages
         system_message = SystemMessage(content=SYSTEM_INSTRUCTIONS)
         intent_instructions = SystemMessage(content=intent_specific_instructions)
         chat_history = [system_message, intent_instructions]
-        chat_history.extend([BaseMessage(role=x.role, content=x.content) for x in history if x.role != "System"])
+        
+        # Convert ChatMessage to appropriate langchain message type
+        if history:
+            for msg in history:
+                if msg.role == "user":
+                    chat_history.append(HumanMessage(content=msg.content))
+                elif msg.role == "assistant":
+                    chat_history.append(AIMessage(content=msg.content))
+        
+        # Ensure we have at least one human message
+        if not any(isinstance(msg, HumanMessage) for msg in chat_history):
+            chat_history.append(HumanMessage(content="Please provide a response."))
         
         # Get response from model
         response = llm_model.invoke(chat_history)
@@ -116,54 +127,6 @@ BOOKING_TEMPLATES = {
     "fi": "Hei {user_name},\n\nTässä seuraavat vapaat 30 minuutin ajat keskustelulle Ollin kanssa (ajat Helsinki/EEST):\n\n{slots}\n\nJos mikään näistä ei sovi, voit ehdottaa toista aikaa tai käyttää varauslinkkiä: {booking_link}\n\nOdotan vastaustasi!\nOllin henkilökohtainen assistentti"
 }
 
-# Define the booking response model
-class BookingResponse(BaseModel):
-    """Model for generating booking responses."""
-    greeting: str = Field(description="Greeting with user's name")
-    slots_intro: str = Field(description="Introduction to available slots")
-    slots: List[str] = Field(description="List of available slots")
-    fallback_option: str = Field(description="Text about suggesting another time or using booking link")
-    booking_link: str = Field(description="The booking link")
-    signoff: str = Field(description="Signoff message")
-
-def get_booking_template(language: str, user_name: str, slots: list, booking_link: str) -> str:
-    """Generates a booking response using tool calls for supported languages."""
-    if language not in BOOKING_TEMPLATES:
-        # For unsupported languages, use freeform response
-        system_message = SystemMessage(content=f"""You are Olli's Personal Assistant for OTL.fi.
-Generate a booking response in {language} using the provided information.
-Be professional, concise, and helpful. Include a greeting, available slots, and a signoff.
-The response should be in {language}.""")
-
-        human_message = HumanMessage(content=f"""Generate a booking response with the following information:
-- User name: {user_name or 'there'}
-- Available slots: {slots if slots else '(No available slots)'}
-- Booking link: {booking_link}
-
-The response should be in {language} and include:
-1. A greeting with the user's name
-2. Introduction to available slots
-3. List of available slots
-4. Option to suggest another time or use the booking link
-5. A professional signoff""")
-
-        try:
-            response = llm_model.invoke([system_message, human_message])
-            if response and response.content:
-                return response.content.strip()
-        except Exception as e:
-            print(f"Error generating freeform booking response: {e}")
-            # Fallback to English template and translate
-            template = BOOKING_TEMPLATES["en"]
-            slots_str = "\n".join(f"- {slot}" for slot in slots) if slots else "(No available slots)"
-            response = template.format(user_name=user_name or "there", slots=slots_str, booking_link=booking_link)
-            return translate_text(response, language)
-
-    # For supported languages, use the template
-    template = BOOKING_TEMPLATES[language]
-    slots_str = "\n".join(f"- {slot}" for slot in slots) if slots else "(No available slots)"
-    return template.format(user_name=user_name or "there", slots=slots_str, booking_link=booking_link)
-
 def translate_text(text: str, target_language: str) -> str:
     if target_language in BOOKING_TEMPLATES:
         return text  # Already in supported language
@@ -189,7 +152,6 @@ def generate_greeting_response(user_name: str, user_language: str, conversation_
 
 def generate_contextual_response(
     intent: str,
-    user_input: str,
     conversation_history: list[ChatMessage],
     user_name: str = None,
     available_slots: list = None,
@@ -212,37 +174,54 @@ def generate_contextual_response(
 
     language = user_language if user_language in BOOKING_TEMPLATES else "en"
 
-    # DEBUG: Print available_slots
-    print(f"[DEBUG] available_slots: {available_slots}")
-
     if intent == Intent.REQUEST_BOOKING:
-        slot_list = [slot.get('time') if isinstance(slot, dict) else slot for slot in (available_slots or [])]
-        print(f"[DEBUG] slot_list for booking: {slot_list}")
-        booking_msg = get_booking_template(language, user_name, slot_list, booking_link)
-        print(f"[DEBUG] booking_msg: {booking_msg}")
+        # For booking requests, just use the template directly
+        slots_str = "\n".join(f"- {slot.time}" for slot in available_slots) if available_slots else "(No available slots)"
+        booking_msg = BOOKING_TEMPLATES[language].format(
+            user_name=user_name or "there",
+            slots=slots_str,
+            booking_link=booking_link
+        )
         if user_language not in BOOKING_TEMPLATES:
             booking_msg = translate_text(booking_msg, user_language)
         return booking_msg
 
     elif intent == Intent.QUESTION_SERVICES:
-        slot_list = [slot.get('time') if isinstance(slot, dict) else slot for slot in (available_slots or [])]
-        booking_msg = get_booking_template(language, user_name, slot_list, booking_link)
+        # Format slots properly
+        slots_str = "\n".join(f"- {slot.time}" for slot in available_slots) if available_slots else "(No available slots)"
+        booking_msg = BOOKING_TEMPLATES[language].format(
+            user_name=user_name or "there",
+            slots=slots_str,
+            booking_link=booking_link
+        )
+        if user_language not in BOOKING_TEMPLATES:
+            booking_msg = translate_text(booking_msg, user_language)
 
-        prompt = f"""Provide a concise and helpful answer based on this information: {website_info}. Reply in {user_language if user_language else 'English'}.
-Include booking template into the answer, translate it if needed.
+        prompt = f"""You are Olli's Personal Assistant for OTL.fi. Provide a concise and helpful answer about our services.
+Include the booking template in your response.
 
-BOOKING TEMPLATE:
-{booking_msg}"""
+INFORMATION ABOUT OTL.FI:
+{website_info}
 
+BOOKING TEMPLATE TO INCLUDE:
+{booking_msg}
+
+Your response should:
+1. Briefly explain what OTL.fi does
+2. Include the booking template exactly as provided
+3. Be professional and helpful
+4. Be in {user_language if user_language else 'English'}"""
+
+        return _safe_generate_content(prompt, conversation_history)
 
     elif intent == Intent.GREETING:
         prompt =  f"The user sent a greeting. Respond politely and greet the user {user_name} Ask how you can help them today. Reply in {user_language if user_language else 'English'}."
 
     elif intent == Intent.PROVIDE_INFO:
-        prompt = f"The user has provided some information: '{user_input}'. Acknowledge receipt of the information. If this completes a previous request from you (e.g. asking for their email or name), confirm that. Decide the next natural step, which might be to proceed with a booking if that was the prior intent, or ask if there's anything else you can help with. Reply in {user_language if user_language else 'English'}."
+        prompt = f"Acknowledge receipt of the information. If this completes a previous request from you (e.g. asking for their email or name), confirm that. Decide the next natural step, which might be to proceed with a booking if that was the prior intent, or ask if there's anything else you can help with. Reply in {user_language if user_language else 'English'}."
 
     elif intent == Intent.FOLLOW_UP:
-        prompt = f"The user is following up: '{user_input}'. Check the conversation history to understand the context. Respond appropriately to their follow-up. If it's about a booking, re-iterate options or check status if possible (currently not possible). Reply in {user_language if user_language else 'English'}."
+        prompt = f"Check the conversation history to understand the context. Respond appropriately to their follow-up. If it's about a booking, re-iterate options or check status if possible (currently not possible). Reply in {user_language if user_language else 'English'}."
 
     elif intent == Intent.NOT_INTERESTED_BUYING:
         prompt = f"The user has indicated they are not interested in buying OTL.fi's services. Respond politely, thank them for their time, and perhaps mention they can reach out in the future if their needs change. Do not push for a booking. Reply in {user_language if user_language else 'English'}."
@@ -251,10 +230,13 @@ BOOKING TEMPLATE:
         prompt = f"The user seems interested in SELLING their products/services TO OTL.fi. Politely inform them that OTL.fi is not currently looking to procure such services/products. Thank them for their interest. Do NOT offer to book a call for this intent. Reply in {user_language if user_language else 'English'}."
 
     elif intent == Intent.UNSURE:
-        prompt = f"The user's intent is unclear from their message: '{user_input}'. Politely ask for clarification on how you can help them. You can also offer the booking link ({booking_link}) if they'd like to discuss their needs with Olli. Reply in {user_language if user_language else 'English'}."
+        prompt = f"The user's intent is unclear from their latest message. Politely ask for clarification on how you can help them. You can also offer the booking link ({booking_link}) if they'd like to discuss their needs with Olli. Reply in {user_language if user_language else 'English'}."
+
+    elif intent == Intent.BOOK_A_MEETING:
+        prompt = f"The user wanted to book a meeting. We encountered an error while booking the meeting. Provice the user with the booking link ({booking_link}) and ask if they'd like to try again. Reply in {user_language if user_language else 'English'}."
 
     else:
-        prompt = f"The user's intent was classified as '{intent}', but no specific response guidance is available. Use your best judgment to respond to '{user_input}' based on the conversation history and general knowledge. If in doubt, offer to book a call: {booking_link}. Reply in {user_language if user_language else 'English'}."
+        prompt = f"The user's intent was classified as '{intent}', but no specific response guidance is available. Use your best judgment to respond to the latest message based on the conversation history and general knowledge. If in doubt, offer to book a call: {booking_link}. Reply in {user_language if user_language else 'English'}."
 
     return _safe_generate_content(prompt, conversation_history)
 
@@ -276,6 +258,9 @@ def validate_slot(result: SlotSelection, available_slots: list[AvailableSlot]) -
     if not isinstance(result, SlotSelection):
         return False, "Invalid result type: expected SlotSelection"
     
+    if isinstance(result.selected_slot, str):
+        result.selected_slot = datetime.fromisoformat(result.selected_slot)
+
     # Check if result has required fields with correct types
     if not isinstance(result.selected_slot, datetime):
         return False, "Selected slot must be a datetime object"
@@ -289,23 +274,18 @@ def validate_slot(result: SlotSelection, available_slots: list[AvailableSlot]) -
     if not result.selected_slot:
         return False, "No slot was selected"
         
-    # Convert available slots to datetime objects for comparison
-    available_datetimes = []
-    for slot in available_slots:
-        if isinstance(slot, dict) and 'iso' in slot:
-            try:
-                available_datetimes.append(datetime.fromisoformat(slot['iso']))
-            except ValueError:
-                continue
-        elif isinstance(slot, str):
-            try:
-                available_datetimes.append(datetime.fromisoformat(slot))
-            except ValueError:
-                continue
+    # Convert selected slot to UTC
+    selected_utc = result.selected_slot.astimezone(timezone.utc)
     
     # Check if selected slot matches any available slot
-    for available_dt in available_datetimes:
-        if result.selected_slot == available_dt:
+    for slot in available_slots:
+        # Convert available slot to UTC
+        available_dt = datetime.fromisoformat(slot.iso)
+        available_utc = available_dt.astimezone(timezone.utc)
+        
+        # Calculate time difference
+        time_diff = abs((selected_utc - available_utc).total_seconds())
+        if time_diff < 1:  # Less than 1 second difference
             return True, ""
             
     return False, f"Selected slot {result.selected_slot} does not match any available slot"
@@ -321,12 +301,10 @@ def parse_booked_slot(
         return SlotSelection(selected_slot=None, confidence=0.0)
     
     now = datetime.now()
-    last_error = None
     retry_count = 0
 
     # available_slots is a list of dicts with 'time' and 'iso' keys
-    slot_list = [slot['time'] if isinstance(slot, dict) and 'time' in slot else str(slot) for slot in available_slots]
-    slot_list_str = '\n'.join(f"- {slot}" for slot in slot_list)
+    slot_list_str = '\n'.join(f"- {slot.iso} - {slot.time}" for slot in available_slots)
     
     # Convert conversation history to string format
     conversation_history_str = "\n".join([f"{msg.role}: {msg.content}" for msg in conversation_history]) if conversation_history else "No previous conversation."
@@ -342,10 +320,8 @@ If your selection is invalid, you will be given feedback and must try again.
 date and time of the current moment: {now}""")
             
         human_message = HumanMessage(content=f"""The user has replied: '{user_input}'
-Here are the available slots (each is a string):
+Here are the available slots (each is a string) as time and iso format. Use the ISO format:
 {slot_list_str}
-
-{last_error if last_error else ''}
 
 Based on the user's message and the conversation history, select the exact slot string from the list above that the user wants to book.
 You MUST select a slot that exactly matches one from the available slots list.
@@ -354,8 +330,9 @@ Conversation history:
 
         try:
             # Get structured output using the model
+            ai_chat = [system_message, human_message]
             structured_llm = llm_model.with_structured_output(SlotSelection)
-            result = structured_llm.invoke([system_message, human_message])
+            result = structured_llm.invoke(ai_chat)
             
             # Validate the selected slot
             is_valid, error_message = validate_slot(result, available_slots)
@@ -364,11 +341,13 @@ Conversation history:
                 return result
             
             last_error = f"Previous attempt failed: {error_message}. Please try again with a valid slot from the list."
+            ai_chat.append(AIMessage(content=last_error))
             retry_count += 1
             
         except Exception as e:
             print(f"Error during slot selection and booking: {e}")
             last_error = f"An error occurred: {str(e)}. Please try again."
+            ai_chat.append(AIMessage(content=last_error))
             retry_count += 1
     
     # If we've exhausted all retries, return failure

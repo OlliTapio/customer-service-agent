@@ -10,6 +10,7 @@ CREDENTIALS_PATH = os.path.join(SECRETS_FOLDER, "credentials.json")  # Updated t
 
 # Email settings
 ASSISTANT_EMAIL = "assistant@otl.fi"
+SKIP_SENDING_EMAILS = True  # Set to False to send actual emails
 
 GOOGLE_GEMINI_API_KEY = None
 
@@ -24,6 +25,7 @@ if os.path.exists(CREDENTIALS_PATH):
             creds = json.load(f)
             GOOGLE_GEMINI_API_KEY = creds.get("GOOGLE_GEMINI_API_KEY")
             CAL_COM_API_KEY = creds.get("CAL_COM_API_KEY")
+            SKIP_SENDING_EMAILS = creds.get("SKIP_SENDING_EMAILS", False)
         if not GOOGLE_GEMINI_API_KEY:
             print(f"Warning: GOOGLE_GEMINI_API_KEY not found in {CREDENTIALS_PATH}")
     except json.JSONDecodeError:

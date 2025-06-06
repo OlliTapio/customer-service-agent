@@ -43,12 +43,16 @@ class EmailController(BaseController):
         # Create or fetch conversation state
         state = self._prepare_conversation_state(
             thread_id=thread_id,
-            sender_email=parsed_info['sender'],
+            sender_email=parsed_info['sender_email'],
             email_body=parsed_info['body']
         )
 
         # Run conversation workflow
         final_state = conversation_app.invoke(state)
+        
+        # Convert AddableValuesDict back to EmailConversationState if needed
+        if not isinstance(final_state, EmailConversationState):
+            final_state = EmailConversationState(**final_state)
 
         # Save state and send response
         self._handle_final_state(final_state, thread_id, msg_id, subject)
@@ -92,7 +96,7 @@ class EmailController(BaseController):
             last_updated=datetime.now().isoformat(),
             user_input=email_body,
             user_email=sender_email,
-            user_name=None,
+            user_name="",
             appended_chat_history=[],
             previous_chat_history=[],
             classified_intent=None,
@@ -106,6 +110,7 @@ class EmailController(BaseController):
         
         # Update with existing state if available
         if existing_state:
+            # Convert chat_history to previous_chat_history
             initial_state.previous_chat_history = existing_state.chat_history
             initial_state.user_email = existing_state.user_email
             initial_state.user_name = existing_state.user_name
@@ -113,8 +118,6 @@ class EmailController(BaseController):
             # Preserve booking context
             initial_state.available_slots = existing_state.available_slots
             initial_state.booked_slot = existing_state.booked_slot
-            initial_state.booking_link = existing_state.booking_link
-            initial_state.event_type_slug = existing_state.event_type_slug
         
         return initial_state
 
@@ -127,36 +130,45 @@ class EmailController(BaseController):
     ) -> None:
         """Handle the final state after conversation processing."""
         try:
-            # Save final state
+            # Ensure thread_id is set on the state
             if thread_id:
+                final_state.thread_id = thread_id
                 final_state.last_updated = datetime.now().isoformat()
-                # Ensure we're not losing any booking information
-                if not final_state.available_slots and hasattr(final_state, 'available_slots'):
-                    final_state.available_slots = None
-                if not final_state.booked_slot and hasattr(final_state, 'booked_slot'):
-                    final_state.booked_slot = None
-                
+            
+            # Initialize available_slots and booked_slot if they don't exist
+            if not hasattr(final_state, 'available_slots'):
+                final_state.available_slots = None
+            if not hasattr(final_state, 'booked_slot'):
+                final_state.booked_slot = None
+            
+            # Save state if we have a thread_id
+            if thread_id:
                 self.state_repository.save_state(thread_id, final_state)
-                print(f"Saved final state to database for thread {thread_id}")
-                if final_state.booked_slot:
-                    print(f"Booking confirmed for slot: {final_state.booked_slot.time}")
-
-            # Send response if we have one
+            
+            # Send response email if we have a generated response
             if final_state.generated_response:
-                reply_subject = f"Re: {message_subject}"
-                self.delivery_manager.send_email_response(final_state, reply_subject)
-
-            # Mark original email as read
-            service = self.gmail_service.authenticate_gmail()
-            if service:
-                self.gmail_service.mark_email_as_read(service, msg_id)
-
+                # Add "Re: " prefix to subject if not already present
+                subject = message_subject
+                if not subject.lower().startswith('re:'):
+                    subject = f"Re: {subject}"
+                
+                self.delivery_manager.send_email_response(
+                    to=final_state.user_email,
+                    subject=subject,
+                    body=final_state.generated_response
+                )
+                
+                # Mark original email as read
+                service = self.gmail_service.authenticate_gmail()
+                if service:
+                    self.gmail_service.mark_email_as_read(service, msg_id)
+                
         except Exception as e:
             print(f"Error handling final state: {e}")
-            # Even if there's an error, try to save the state
+            # Try to save error state if we have a thread_id
             if thread_id:
                 try:
-                    final_state.error_message = f"Error in final state handling: {str(e)}"
+                    final_state.error_message = str(e)
                     self.state_repository.save_state(thread_id, final_state)
                 except Exception as save_error:
                     print(f"Failed to save error state: {save_error}")

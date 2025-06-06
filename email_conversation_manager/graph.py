@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-import services.llm_service as llm_service
+from langgraph.prebuilt import ToolNode
 
 from .types import EmailConversationState, Intent
 from .nodes import (
@@ -15,7 +15,7 @@ def create_conversation_graph() -> StateGraph:
     """Creates and configures the conversation workflow graph."""
     workflow = StateGraph(EmailConversationState)
 
-    # Add nodes
+    # Add nodes with explicit state type handling
     workflow.add_node("new_interaction", new_interaction)
     workflow.add_node("classify_intent", classify_intent_node)
     workflow.add_node("gather_information", gather_information_node)

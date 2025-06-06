@@ -33,23 +33,13 @@ def test_two_message_booking_flow(monkeypatch, example_slots):
     
     # Mock cal_service to return example slots
     def mock_get_available_slots(event_type_id, days_to_check, target_timezone):
-        print(f"[DEBUG] Mock get_available_slots called with: event_type_id={event_type_id}, days_to_check={days_to_check}, target_timezone={target_timezone}")
         slots = [slot["iso"] for slot in example_slots]
-        print(f"[DEBUG] Returning slots: {slots}")
         return slots
 
     monkeypatch.setattr(cal_service, "get_available_slots_v1", mock_get_available_slots)
     monkeypatch.setattr(cal_service, "get_event_type_details_v2", lambda user_cal_username, event_type_slug: {"id": 123})
     monkeypatch.setattr(cal_service, "create_booking", lambda *a, **kw: {"success": True, "data": {}})
-
-    # Mock LLM services to return consistent responses
-    def mock_parse_booked_slot(user_input, available_slots, conversation_history, user_language="en"):
-        return type('obj', (object,), {
-            'confidence': 0.9,
-            'selected_slot': available_slots[0].iso
-        })
     
-    monkeypatch.setattr(llm_service, "parse_booked_slot", mock_parse_booked_slot)
     monkeypatch.setattr(llm_service, "generate_meeting_description", lambda *a, **kw: "Test meeting")
     
     thread_id = "123"

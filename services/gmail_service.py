@@ -66,12 +66,10 @@ def send_email(service: Any, to_address: str, subject: str, message_text: str) -
 
         raw_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
         create_message = {'raw': raw_message}
-        # Skip sending the email for now
-        return create_message
-
-        # message = service.users().messages().send(userId='me', body=create_message).execute()
-        # print(f'Message Id: {message["id"]} sent to {to_address}')
-        # return message
+        
+        message = service.users().messages().send(userId='me', body=create_message).execute()
+        print(f'Message Id: {message["id"]} sent to {to_address}')
+        return message
     except Exception as e:
         print(f'An error occurred while sending email: {e}')
         return None

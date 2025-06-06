@@ -1,6 +1,6 @@
 # Core dependencies
-langchain-core==0.3.60
-langchain-google-genai==2.1.4
+langchain-core==0.3.62
+langchain-google-genai==2.1.5
 pydantic==2.11.4
 pydantic_core==2.33.2
 
@@ -57,6 +57,7 @@ ormsgpack==1.9.1
 # Type checking and validation
 annotated-types==0.7.0
 typing-inspection==0.4.0
+mypy==1.9.0
 
 # Optional dependencies (can be removed if not used)
 anyio==4.9.0

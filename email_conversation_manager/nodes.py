@@ -6,7 +6,6 @@ from helpers.booking_helpers import format_slots, select_slots
 import services.llm_service as llm_service
 import services.cal_service as cal_service
 import config
-from services.delivery_manager import DeliveryManager
 
 from .types import ChatMessage, EmailConversationState, Intent
 
@@ -78,30 +77,23 @@ def gather_information_node(state: EmailConversationState) -> EmailConversationS
         print("Attempting to fetch calendar availability...")
         try:
             event_slug_to_use = get_event_type_slug_from_state_or_config(state)
-            print(f"[DEBUG] Using event_slug: {event_slug_to_use}")
             if not event_slug_to_use:
                 return set_error_and_return(state, "Event type slug not configured or found in state.")
             event_details_v2 = cal_service.get_event_type_details_v2(
                 user_cal_username=config.CAL_COM_USERNAME,
                 event_type_slug=event_slug_to_use
             )
-            print(f"[DEBUG] Event details v2: {event_details_v2}")
             if event_details_v2 and event_details_v2.get("id"):
                 event_type_id_v1 = event_details_v2["id"]
-                print(f"[DEBUG] Fetching raw slots for event_type_id_v1: {event_type_id_v1}")
                 raw_slots = fetch_raw_slots(event_type_id_v1)
-                print(f"[DEBUG] Raw slots: {raw_slots}")
                 selected_slots = select_slots(raw_slots)
-                print(f"[DEBUG] Selected slots: {selected_slots}")
                 formatted_slots = format_slots(selected_slots, state.user_language or "en")
-                print(f"[DEBUG] Formatted slots: {formatted_slots}")
                 state.available_slots = formatted_slots
                 state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Fetched {len(formatted_slots)} available slots: {formatted_slots}"))
                 print(f"Fetched {len(formatted_slots)} available slots: {formatted_slots}")
             else:
                 return set_error_and_return(state, f"Could not fetch V2 event details or ID for slug {event_slug_to_use} to get V1 slots.")
         except Exception as e:
-            print(f"[DEBUG] Error in gather_information_node: {str(e)}")
             return set_error_and_return(state, f"Error fetching calendar availability: {e}")
     return state
 
@@ -110,7 +102,6 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
     print("---NODE: Book a Meeting---")
     available_slots = state.available_slots or []
     if not available_slots:
-        print(f"[DEBUG] No available slots to book.")
         state.error_message = "No available slots to book."
         state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
         return state
@@ -124,12 +115,9 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
         user_input=user_input,
         available_slots=available_slots,
         conversation_history=conversation_history,
-        user_language=user_language
     )
-    print(f"[DEBUG] Selected slot: {selected_slot}")
 
     if selected_slot.confidence < 0.7:
-        print(f"[DEBUG] Failed to parse suitable slot for the booking. Confidence: {selected_slot.confidence}")
         state.error_message = "Failed to parse suitable slot for the booking."
         state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
         return state
@@ -140,17 +128,23 @@ def book_a_meeting_node(state: EmailConversationState) -> EmailConversationState
         # Handles both with and without 'Z'
         if iso_str.endswith('Z'):
             iso_str = iso_str.replace('Z', '+00:00')
-        return datetime.fromisoformat(iso_str)
+        dt = datetime.fromisoformat(iso_str)
+        return dt
 
+    # Parse the selected slot into a datetime object
+    selected_datetime = selected_slot.selected_slot
+    
     booked_slot = next(
         (
             slot for slot in available_slots
-            if parse_iso(slot.iso) == selected_slot.selected_slot
+            if parse_iso(slot.iso) == selected_datetime
         ),
         None
     )
     if not booked_slot:
-        print(f"[DEBUG] Could not find the selected slot in the available slots. Selected slot: {selected_slot.selected_slot}, Available slots: {available_slots}")
+        for slot in available_slots:
+            parsed = parse_iso(slot.iso)
+            print(f"  - {slot.iso} -> {parsed} (type: {type(parsed)})")
         state.error_message = "Could not find the selected slot in the available slots."
         state.appended_chat_history.append(ChatMessage(role="Assistant", content=f"Error - {state.error_message}"))
         return state
@@ -212,12 +206,12 @@ def generate_response_node(state: EmailConversationState) -> EmailConversationSt
     try:
         response_text = llm_service.generate_contextual_response(
             intent=state.classified_intent,
-            user_input=state.user_input or "",
             conversation_history=state.previous_chat_history + state.appended_chat_history,
             user_name=state.user_name,
             available_slots=state.available_slots,
             booking_link=state.booking_link,
             event_type_slug=state.event_type_slug,
+            user_language=state.user_language,
             website_info="OTL.fi provides AI audit and implementation for companies interested in freeing time in their organisation from menial work. For detailed discussions, a call is recommended."
         )
         state.generated_response = response_text
